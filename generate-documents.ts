@@ -4,19 +4,20 @@
 import xlsx, { type WorkBook } from "xlsx";
 import {
   AlignmentType,
+  BorderStyle,
   Document,
   ExternalHyperlink,
-  type FileChild,
   Header,
-  InsertedTextRun,
   type IParagraphOptions,
   type IRunOptions,
   type ISectionOptions,
+  type ISpacingProperties,
   LevelFormat,
   Packer,
+  PageNumber,
   Paragraph,
   type ParagraphChild,
-  SymbolRun,
+  Tab,
   Table,
   TableCell,
   TableRow,
@@ -153,6 +154,8 @@ function isPlainObject(x: any) {
       Object.getPrototypeOf(x) === null)
   );
 }
+
+function mapFields<T>(data: any[], mapper: any): T[];
 function mapFields<T>(data: any[], mapper: Record<string, Mapper>): T[] {
   return data.map((row) => {
     return mapField(row, mapper);
@@ -235,6 +238,8 @@ export type ProposedMeeting = {
   time: string;
   meetingLocation: string;
   zoomRoomOptionType: "none" | "optional" | "primary";
+  shouldShowZoomRoom: boolean;
+  isZoomRoomPrimary: boolean;
   zoomRoomName: string;
   interviewAssignments: string;
   teamChair: boolean;
@@ -386,6 +391,17 @@ function loadData(filename: string): Data {
           [["No", "N/A", ""], "none"],
         ]),
       ],
+      get shouldShowZoomRoom() {
+        let that = this as unknown as ProposedMeeting;
+        return (
+          that.zoomRoomOptionType === "primary" ||
+          that.zoomRoomOptionType === "optional"
+        );
+      },
+      get isZoomRoomPrimary() {
+        let that = this as unknown as ProposedMeeting;
+        return that.zoomRoomOptionType === "primary";
+      },
       zoomRoomName: /^Zoom Link/,
       interviewAssignments: "Interview Assignments",
       teamChair: ["Team Chair", boolean],
@@ -399,7 +415,7 @@ function loadData(filename: string): Data {
       individuals: [
         "Individuals",
         commaSeparatedList,
-        (x) => x.map((entry: string) => displayNameAndId(entry)),
+        (x: string[]) => x.map((entry: string) => displayNameAndId(entry)),
       ],
       hideNames: ["Hide Names", boolean],
     }
@@ -528,6 +544,7 @@ function generateFullItinerary(data: Data, outputFilename: string) {
     },
     sections: [
       Section({
+        headerTitle: "Detailed Itinerary",
         children: proposedMeetingsGroupedByDate.flatMap((group) => {
           return [
             new Paragraph({
@@ -575,10 +592,7 @@ function generateFullItinerary(data: Data, outputFilename: string) {
                       });
                     }
 
-                    if (
-                      meeting.zoomRoomOptionType === "optional" ||
-                      meeting.zoomRoomOptionType === "primary"
-                    ) {
+                    if (meeting.shouldShowZoomRoom) {
                       segments.push({
                         run: ZoomLink(meeting.zoomRoomName, zoomRoomsByName),
                       });
@@ -729,7 +743,7 @@ function generateFullItinerary(data: Data, outputFilename: string) {
 }
 
 function generateIndividualItineraries(data: Data, outputFilename: string) {
-  const { proposedMeetingsData, participantListData } = data;
+  const { proposedMeetingsData, participantListData, zoomRoomsByName } = data;
 
   let teamMembers = participantListData.filter(
     (p) => p.teamMemberRoles.length > 0
@@ -760,25 +774,8 @@ function generateIndividualItineraries(data: Data, outputFilename: string) {
 
     let groupedMeetingsByDate = groupBy(meetingsForIndividual, (m) => m.date);
 
-    return {
-      properties: {
-        page: {
-          size: {
-            width: "8.5in",
-            height: "11in",
-          },
-          margin: {
-            left: "0.5in",
-            right: "0.5in",
-            top: "0.5in",
-            bottom: "0.5in",
-          },
-        },
-        titlePage: true,
-      },
-      headers: {
-        first: CommonHeader(),
-      },
+    return Section({
+      headerTitle: "Team Member Itinerary",
       children: [
         new Paragraph({
           alignment: AlignmentType.CENTER,
@@ -804,8 +801,8 @@ function generateIndividualItineraries(data: Data, outputFilename: string) {
           layout: "fixed",
           columnWidths: [
             twips.fromInches(1.5),
-            twips.fromInches(3.5),
-            twips.fromInches(2.5),
+            twips.fromInches(3),
+            twips.fromInches(3),
           ],
           margins: {
             left: twips.fromInches(0.1),
@@ -820,7 +817,11 @@ function generateIndividualItineraries(data: Data, outputFilename: string) {
             for (let group of groupedMeetingsByDate) {
               rows.push(
                 new TableRow({
-                  children: [HeaderTableCell(group.key, { columnSpan: 3 })],
+                  children: [
+                    HeaderTableCell(group.key, {
+                      columnSpan: 3,
+                    }),
+                  ],
                 })
               );
 
@@ -843,7 +844,27 @@ function generateIndividualItineraries(data: Data, outputFilename: string) {
                         alignment: AlignmentType.RIGHT,
                       }),
                       NormalTableCell(meeting.interviewAssignments),
-                      NormalTableCell(meeting.meetingLocation),
+                      NormalTableCell(
+                        iife(() => {
+                          let results: (string | IParagraphOptions)[] = [];
+
+                          results.push({
+                            // keepNext: !isLast,
+                            text: meeting.meetingLocation,
+                          });
+
+                          if (meeting.isZoomRoomPrimary) {
+                            results.push({
+                              // keepNext: !isLast,
+                              children: [
+                                ZoomLink(meeting.zoomRoomName, zoomRoomsByName),
+                              ],
+                            });
+                          }
+
+                          return results;
+                        })
+                      ),
                     ],
                   })
                 );
@@ -853,11 +874,14 @@ function generateIndividualItineraries(data: Data, outputFilename: string) {
           }),
         }),
       ],
-    };
+    });
   }
 }
 
-function HeaderTableCell(text: string, options?: { columnSpan?: number }) {
+function HeaderTableCell(
+  text: string,
+  options?: { columnSpan?: number; keepNext?: boolean }
+) {
   return new TableCell({
     columnSpan: options?.columnSpan,
     shading: {
@@ -868,6 +892,7 @@ function HeaderTableCell(text: string, options?: { columnSpan?: number }) {
     children: [
       new Paragraph({
         alignment: AlignmentType.CENTER,
+        keepNext: options?.keepNext,
         children: [new TextRun({ bold: true, text })],
       }),
     ],
@@ -879,10 +904,14 @@ function NormalTableCell(
   options?: {
     rowSpan?: number;
     alignment?: (typeof AlignmentType)[keyof typeof AlignmentType];
+    hideBottomBorder?: boolean;
+    hideTopBorder?: boolean;
+    keepNext?: boolean;
   }
 ) {
   let paragraphOptions: Mutable<IParagraphOptions> = {
     alignment: options?.alignment,
+    keepNext: options?.keepNext,
   };
 
   if (typeof children === "string") {
@@ -891,6 +920,14 @@ function NormalTableCell(
 
   return new TableCell({
     rowSpan: options?.rowSpan,
+    borders: {
+      bottom: options?.hideBottomBorder
+        ? {
+            style: BorderStyle.NIL,
+          }
+        : undefined,
+      top: options?.hideTopBorder ? { style: BorderStyle.NIL } : undefined,
+    },
     children: children.map((paragraphArgument) => {
       if (typeof paragraphArgument === "string") {
         paragraphArgument = { text: paragraphArgument };
@@ -931,7 +968,10 @@ function generateSummaryItinerary(data: Data, outputFilename: string) {
   let doc = new Document({
     sections: [
       Section({
-        commonHeaderTitle: "Summary Itinerary and Key Contacts",
+        headerTitle: [
+          "Summary Itinerary and Key Contacts",
+          "Summary Itinerary & Key Contacts",
+        ],
         children: [
           ...separated(
             proposedMeetingsGroupedByDate,
@@ -973,36 +1013,32 @@ function generateSummaryItinerary(data: Data, outputFilename: string) {
                   ...proposedMeetingsGroupedByTime.flatMap((group) => {
                     const rows: TableRow[] = [];
 
-                    let countMeetings = group.length;
                     let meetingTime = group.key;
-                    let rowHeaderCell = NormalTableCell(meetingTime, {
-                      rowSpan: countMeetings,
-                      alignment: AlignmentType.RIGHT,
-                    });
 
                     group.forEach((meeting, index) => {
                       let row: TableCell[] = [];
 
+                      let isFirst = index === 0;
                       let isLast = index === group.length - 1;
 
-                      if (index === 0) {
-                        row.push(rowHeaderCell);
-                      }
-
                       row.push(
+                        NormalTableCell(isFirst ? meetingTime : "", {
+                          alignment: AlignmentType.RIGHT,
+                          hideBottomBorder: !isLast,
+                          hideTopBorder: !isFirst,
+                          keepNext: !isLast,
+                        }),
                         NormalTableCell(meeting.interviewAssignments),
                         NormalTableCell(
                           iife(() => {
                             let results: (string | IParagraphOptions)[] = [];
 
                             results.push({
-                              // keepNext: !isLast,
                               text: meeting.meetingLocation,
                             });
 
-                            if (meeting.zoomRoomOptionType === "primary") {
+                            if (meeting.shouldShowZoomRoom) {
                               results.push({
-                                // keepNext: !isLast,
                                 children: [
                                   ZoomLink(
                                     meeting.zoomRoomName,
@@ -1042,10 +1078,10 @@ function generateSummaryItinerary(data: Data, outputFilename: string) {
 }
 
 function Section({
-  commonHeaderTitle,
+  headerTitle,
   children,
 }: {
-  commonHeaderTitle?: string;
+  headerTitle: string | [string, string];
   children: ISectionOptions["children"];
 }): ISectionOptions {
   return {
@@ -1061,37 +1097,95 @@ function Section({
           top: "0.5in",
           bottom: "0.5in",
         },
+        pageNumbers: {
+          start: 1,
+        },
       },
       titlePage: true,
     },
-    headers: {
-      first: CommonHeader({ title: commonHeaderTitle }),
-    },
+    headers: CommonHeader({ title: headerTitle }),
     children,
   };
 }
 
 function CommonHeader({
-  title = "Detailed Itinerary",
-}: { title?: string } = {}) {
-  return new Header({
-    children: [
-      HeaderParagraph({
-        size: "18pt",
-        color: "92002E",
-        text: "Commonwealth University",
-      }),
-      HeaderParagraph({
-        text: "MSCHE Team Visit",
-      }),
-      HeaderParagraph({
-        text: title,
-      }),
-      HeaderParagraph({
-        text: "March 23-26, 2025",
-      }),
-    ],
-  });
+  mainTitle = "MSCHE Team Visit",
+  title,
+}: {
+  mainTitle?: string;
+  title: string | [string, string];
+}): ISectionOptions["headers"] {
+  let firstPageHeaderTitle, defaultHeaderTitle;
+
+  if (typeof title === "string") {
+    firstPageHeaderTitle = defaultHeaderTitle = title;
+  } else {
+    [firstPageHeaderTitle, defaultHeaderTitle] = title;
+  }
+
+  return {
+    first: new Header({
+      children: [
+        FirstPageHeaderParagraph({
+          size: "18pt",
+          color: "92002E",
+          text: "Commonwealth University",
+        }),
+        FirstPageHeaderParagraph({
+          text: mainTitle,
+        }),
+        FirstPageHeaderParagraph({
+          text: firstPageHeaderTitle,
+        }),
+        FirstPageHeaderParagraph({
+          text: "March 23-26, 2025",
+        }),
+      ],
+    }),
+    default: new Header({
+      children: [
+        DefaultHeaderParagraph({
+          children: [
+            mainTitle,
+            new Tab(),
+            { color: "92002E", text: defaultHeaderTitle },
+            " | ",
+            PageNumber.CURRENT,
+          ],
+        }),
+        DefaultHeaderParagraph({
+          text: "",
+        }),
+      ],
+    }),
+  };
+
+  function DefaultHeaderParagraph(props: HeaderParagraphProps) {
+    return HeaderParagraphCore({
+      alignment: AlignmentType.LEFT,
+      size: "10pt",
+      borders: false,
+      spacingAfter: 0,
+      tabStops: [
+        { type: "left", position: 0 },
+        { type: "right", position: twips.fromInches(7.5) },
+      ],
+
+      ...props,
+    });
+  }
+
+  function FirstPageHeaderParagraph(props: HeaderParagraphProps) {
+    return HeaderParagraphCore({
+      alignment: AlignmentType.CENTER,
+      size: "14pt",
+      characterSpacing: twips.fromPoints(1.5),
+      borders: true,
+      borderColor: "54585A",
+
+      ...props,
+    });
+  }
 
   interface HeaderParagraphProps {
     alignment?: IParagraphOptions["alignment"];
@@ -1101,54 +1195,96 @@ function CommonHeader({
     color?: IRunOptions["color"];
     characterSpacing?: IRunOptions["characterSpacing"];
     bold?: IRunOptions["bold"];
-    text: IRunOptions["text"];
-
+    borders?: boolean;
     borderColor?: string;
+    spacingAfter?: number;
+    tabStops?: IParagraphOptions["tabStops"];
+
+    text?: IRunOptions["text"];
+    children?: (
+      | string
+      | Tab
+      | {
+          color?: IRunOptions["color"];
+          text: IRunOptions["text"];
+        }
+    )[];
   }
-  function HeaderParagraph(props: HeaderParagraphProps) {
+  function HeaderParagraphCore(props: HeaderParagraphProps) {
     let {
       alignment = AlignmentType.CENTER,
       font = "Barlow",
-      size = "14pt",
+      size,
       allCaps = true,
       color = "54585A",
-      characterSpacing = twips.fromPoints(1.5),
+      characterSpacing,
       bold = true,
-      text,
+      borders,
       borderColor = "54585A",
+      spacingAfter = twips.fromPoints(20),
+      tabStops,
+      text,
+      children,
     } = props;
 
     return new Paragraph({
       alignment,
       spacing: {
-        after: twips.fromPoints(20),
+        after: spacingAfter,
       },
+      tabStops,
       contextualSpacing: true,
-      border: {
-        top: {
-          style: "single",
-          size: borderSize.fromPoints(3 / 4),
-          color: borderColor,
-          space: 8, // points
-        },
-        bottom: {
-          style: "single",
-          size: borderSize.fromPoints(3 / 4) / 3,
-          color: borderColor,
-          space: 8, // points
-        },
-      },
-      children: [
-        new TextRun({
-          font,
-          size,
-          allCaps,
-          color,
-          characterSpacing,
-          bold,
-          text,
-        }),
-      ],
+      border: borders
+        ? {
+            top: {
+              style: "single",
+              size: borderSize.fromPoints(3 / 4),
+              color: borderColor,
+              space: 8, // points
+            },
+            bottom: {
+              style: "single",
+              size: borderSize.fromPoints(3 / 4) / 3,
+              color: borderColor,
+              space: 8, // points
+            },
+          }
+        : undefined,
+      children: children
+        ? children.map((child) => {
+            let childColor: string | undefined,
+              childText: string | Tab | undefined;
+
+            if (typeof child === "string") {
+              childColor = undefined;
+              childText = child;
+            } else if (child instanceof Tab) {
+              childColor = undefined;
+              childText = child;
+            } else {
+              ({ color: childColor, text: childText } = child);
+            }
+            return new TextRun({
+              font,
+              size,
+              allCaps,
+              color: childColor ?? color,
+              characterSpacing,
+              bold,
+              children: childText ? [childText] : undefined,
+            });
+          })
+        : [
+            new TextRun({
+              font,
+              size,
+              allCaps,
+              color,
+              characterSpacing,
+              bold,
+              text,
+            }),
+          ],
     });
   }
 }
