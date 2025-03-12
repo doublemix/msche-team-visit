@@ -4,15 +4,131 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Generate Itineraries</title>
+    <style>
+      html {
+        font-family: sans-serif;
+        font-size: 2rem;
+      }
+      html,
+      body {
+        height: 100vh;
+        width: 100%;
+        padding: 0;
+        margin: 0;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      #drop-zone {
+        position: relative;
+        height: 100vh;
+        background: #eee;
+
+        display: flex;
+        flex-flow: column;
+        justify-content: center;
+        align-items: center;
+      }
+      #drop-zone.active *,
+      #drop-zone.invalid * {
+        pointer-events: none;
+      }
+      .active-indicator {
+        display: none;
+        position: absolute;
+        background: #8888;
+        inset: 0;
+        padding: 20px;
+      }
+      .active-indicator-inside {
+        color: #888;
+        font-size: 72px;
+        border: 10px dashed #888;
+        display: flex;
+        flex-flow: column;
+        justify-content: center;
+        align-items: center;
+        width: 100%;
+        height: 100%;
+      }
+      #drop-zone.active .active-indicator {
+        display: block;
+      }
+      #drop-zone.invalid {
+        cursor: not-allowed;
+      }
+      #file-input {
+        display: none;
+      }
+      .button-container {
+        display: flex;
+        flex-flow: column;
+        gap: 20px;
+        max-width: 600px;
+        margin: 30px;
+      }
+      .button-container > button {
+        width: 100%;
+      }
+      button {
+        background: rgb(74, 74, 149);
+        color: white;
+        border: none;
+        font-size: 1rem;
+        padding: 20px 40px;
+        border-radius: 20px;
+      }
+      button:hover {
+        background: rgb(93, 93, 196);
+      }
+      button:active {
+        background: rgb(37, 37, 189);
+      }
+      button:disabled {
+        background: #ccc;
+        color: #888;
+        cursor: not-allowed;
+      }
+      .hr {
+        border-bottom: 3px solid #aaa;
+      }
+      .button-container > p {
+        margin: 0;
+        text-align: center;
+      }
+      #errors {
+        display: none;
+      }
+    </style>
   </head>
   <body>
-    <input
-      id="input"
-      name="input"
-      type="file"
-      accept="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    />
-    <button id="generate-full-itinerary">Generate full itinerary</button>
-    <script src="dist/index.js" type="module"></script>
+    <div id="drop-zone">
+      <div class="button-container">
+        <input
+          id="file-input"
+          name="file-input"
+          type="file"
+          accept="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        />
+        <p>Drag and drop or select an Excel file</p>
+        <button id="select-file-button">Select File</button>
+        <div class="hr"></div>
+        <p>Generate files</p>
+        <button id="generate-full-itinerary" disabled>
+          Generate full itinerary
+        </button>
+        <button id="generate-individual-itineraries" disabled>
+          Generate team member itineraries
+        </button>
+        <button id="generate-summary-itinerary" disabled>
+          Generate summary itinerary
+        </button>
+        <script src="dist/index.js" type="module"></script>
+        <div class="active-indicator">
+          <div class="active-indicator-inside">Drop file</div>
+        </div>
+        <div id="errors"></div>
+      </div>
+    </div>
   </body>
 </html>
