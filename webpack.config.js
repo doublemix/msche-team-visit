@@ -1,5 +1,6 @@
 import path from "path";
 import HtmlWebpackPlugin from "html-webpack-plugin";
+import { CleanWebpackPlugin } from "clean-webpack-plugin";
 
 import { fileURLToPath } from "url";
 
@@ -10,7 +11,7 @@ export default {
   mode: "development",
   entry: "./index.ts",
   output: {
-    filename: "index.js",
+    filename: "index.[contenthash:8].js",
     path: path.resolve(__dirname, "dist"),
   },
   devServer: {
@@ -34,5 +35,8 @@ export default {
       ".js": [".ts", ".js"],
     },
   },
-  plugins: [new HtmlWebpackPlugin({ template: "./index.html" })],
+  plugins: [
+    new CleanWebpackPlugin(),
+    new HtmlWebpackPlugin({ template: "./index.html" }),
+  ],
 };
