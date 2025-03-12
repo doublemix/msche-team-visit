@@ -1,0 +1,20 @@
+{
+  "dependencies": {
+    "docx": "^9.2.0",
+    "xlsx": "^0.18.5"
+  },
+  "name": "2025-02-22-site-visit-schedule",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "type": "module",
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}

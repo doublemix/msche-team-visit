@@ -1,7 +1,7 @@
 /** @jsx h
  *  @jsxFrag hFrag */
 
-import xlsx, { type WorkBook } from "xlsx";
+import { utils as xlsxUtils, read as xlsxRead, type WorkBook } from "xlsx";
 import {
   AlignmentType,
   BorderStyle,
@@ -24,7 +24,10 @@ import {
   TextRun,
   WidthType,
 } from "docx";
-import * as fs from "fs";
+
+function _throw(err: any) {
+  throw err;
+}
 
 type Mutable<T> = {
   -readonly [P in keyof T]: T[P];
@@ -79,20 +82,27 @@ function applyStructuredRequest(structuredRequest: any, mapper: any): any {
   }
 }
 
-function getWorksheets<T extends StructuredRequest<string>>(
+type WorkSheetRequest =
+  | string
+  | {
+      name: string;
+      range?: any;
+    };
+function getWorksheets(
   workbook: WorkBook,
-  worksheetRequests: T
+  worksheetRequests: WorkSheetRequest[]
 ) {
-  return applyStructuredRequest<T, any[], string>(
-    worksheetRequests,
-    (worksheetName: string) => {
-      let worksheet = workbook.Sheets[worksheetName];
-      return xlsx.utils.sheet_to_json(worksheet, {
-        defval: "",
-        skipHidden: true,
-      });
+  return worksheetRequests.map((req) => {
+    if (typeof req === "string") {
+      req = { name: req };
     }
-  );
+    let worksheet = workbook.Sheets[req.name];
+    return xlsxUtils.sheet_to_json<Record<string, string>>(worksheet, {
+      defval: "",
+      skipHidden: true,
+      range: req.range,
+    });
+  });
 }
 
 let boolean = (input: string) => {
@@ -336,22 +346,36 @@ let teamMemberDefinitions = [
 
 let teamMemberDefinitionsByRole = toMap(teamMemberDefinitions, (x) => x.value);
 
-type Data = {
+export type Data = {
   proposedMeetingsData: ProposedMeeting[];
   participantListData: Participant[];
   zoomRooms: ZoomRoom[];
   zoomRoomsByName: Map<string, ZoomRoom>;
 };
 
-function loadData(filename: string): Data {
-  let workbook = xlsx.readFile(filename);
+export type LoadDataOptions = {
+  meetingRange?: number;
+  teamRoleSource:
+    | {
+        type: "meetingsTable";
+        nameRow: number;
+        headerRow: number;
+      }
+    | {
+        type: "participantsTable";
+      };
+};
+
+export function loadData(input: Buffer, opts: LoadDataOptions): Data {
+  // let workbook = xlsx.readFile(filename, { dense: true });
+  let workbook = xlsxRead(input, { dense: true });
 
   let [proposedMeetingsRawData, participantListRawData, zoomRoomsRawData] =
     getWorksheets(workbook, [
-      "Proposed Meetings-MSCHE Team",
+      { name: "Proposed Meetings-MSCHE Team", range: opts.meetingRange },
       "Participant List",
       "Zoom Rooms",
-    ] as [string, string, string]);
+    ]);
   let participantListData = mapFields<Participant>(participantListRawData, {
     prefix: "PFX",
     firstName: "First Name",
@@ -374,21 +398,68 @@ function loadData(filename: string): Data {
       let that = this as unknown as Participant;
       return convertToId(that.fullName);
     },
-    teamMemberRoles: ["Team Member", commaSeparatedList],
+    teamMemberRoles:
+      opts.teamRoleSource.type === "meetingsTable"
+        ? () => []
+        : opts.teamRoleSource.type === "participantsTable"
+        ? ["Team Member", commaSeparatedList]
+        : _throw(new Error("unexpected teamRoleSource")),
   });
+  // let firstRow = proposedMeetingsRawData[0];
+  // if (firstRow.date)
+  //   throw new Error(
+  //     "Unexpected date in first row, first row should be team member assignments"
+  //   );
+
+  if (opts.teamRoleSource.type === "meetingsTable") {
+    let meetingsWorksheet = workbook.Sheets["Proposed Meetings-MSCHE Team"];
+    let meetingsWorksheetFirstRow =
+      meetingsWorksheet[opts.teamRoleSource.nameRow];
+    let columnHeadersRow = meetingsWorksheet[opts.teamRoleSource.headerRow];
+
+    for (let i = 0; i < meetingsWorksheetFirstRow.length; i++) {
+      let teamMemberLastNameCell = meetingsWorksheetFirstRow[i];
+      if (!teamMemberLastNameCell) continue;
+      if (teamMemberLastNameCell.t !== "s")
+        throw new Error("expected cell type to be s");
+      let teamMemberLastName = teamMemberLastNameCell.v;
+      if (teamMemberLastName === "") continue;
+
+      let columnHeaderCell = columnHeadersRow[i];
+      if (columnHeaderCell.t !== "s")
+        throw new Error("expected cell type to be s");
+      let columnName = columnHeaderCell.v;
+
+      let candidateTeamMembers = participantListData.filter(
+        (p) => p.lastName === teamMemberLastName
+      );
+      if (candidateTeamMembers.length < 1)
+        throw new Error(
+          `no candidates for ${columnName}, ${teamMemberLastName}`
+        );
+      if (candidateTeamMembers.length > 1)
+        throw new Error(
+          `multiple candidates for ${columnName}, ${teamMemberLastName}`
+        );
+
+      let teamMember = candidateTeamMembers[0];
+
+      teamMember.teamMemberRoles.push(columnName);
+    }
+  }
+
   let proposedMeetingsData = mapFields<ProposedMeeting>(
     proposedMeetingsRawData.filter((m) => m.Date),
     {
       date: "Date",
       time: "Time",
       meetingLocation: "Meeting Location",
-      // hasZoomRoom: ["Zoom Room Option", stringToBoolean("Yes", "No")],
       zoomRoomOptionType: [
         "Zoom Room Option",
         mapInput([
           ["Primary Room", "primary"],
           ["Yes", "optional"],
-          [["No", "N/A", ""], "none"],
+          [["No", "N/A", "", "N0"], "none"],
         ]),
       ],
       get shouldShowZoomRoom() {
@@ -435,7 +506,7 @@ function loadData(filename: string): Data {
   };
 }
 
-function generateFullItinerary(data: Data, outputFilename: string) {
+export function generateFullItinerary(data: Data) {
   const { proposedMeetingsData, participantListData, zoomRoomsByName } = data;
 
   let allTeamMembers = participantListData.filter(
@@ -737,12 +808,10 @@ function generateFullItinerary(data: Data, outputFilename: string) {
       }),
     });
   }
-  Packer.toBuffer(doc).then((buffer) => {
-    fs.writeFileSync(outputFilename, buffer);
-  });
+  return Packer.toBuffer(doc);
 }
 
-function generateIndividualItineraries(data: Data, outputFilename: string) {
+export function generateIndividualItineraries(data: Data) {
   const { proposedMeetingsData, participantListData, zoomRoomsByName } = data;
 
   let teamMembers = participantListData.filter(
@@ -757,9 +826,7 @@ function generateIndividualItineraries(data: Data, outputFilename: string) {
     sections,
   });
 
-  Packer.toBuffer(doc).then((buffer) => {
-    fs.writeFileSync(outputFilename, buffer);
-  });
+  return Packer.toBuffer(doc);
 
   function generateIndividualItinerarySection(
     individual: Participant
@@ -958,7 +1025,7 @@ function separated<T, R>(
   return results;
 }
 
-function generateSummaryItinerary(data: Data, outputFilename: string) {
+export function generateSummaryItinerary(data: Data) {
   let { proposedMeetingsData, zoomRoomsByName } = data;
   let proposedMeetingsGroupedByDate = groupBy(
     proposedMeetingsData,
@@ -1072,9 +1139,7 @@ function generateSummaryItinerary(data: Data, outputFilename: string) {
     ],
   });
 
-  Packer.toBuffer(doc).then((buffer) => {
-    fs.writeFileSync(outputFilename, buffer);
-  });
+  return Packer.toBuffer(doc);
 }
 
 function Section({
@@ -1319,111 +1384,3 @@ function ZoomLink(
     });
   }
 }
-
-function main() {
-  let args = process.argv.slice(2);
-
-  let flagsOn = true;
-  let shouldGenerateFullItinerary = false;
-  let fullItineraryOutputFile = null;
-  let shouldGenerateIndividualItinerary = false;
-  let individualItineraryOutputFile = null;
-  let shouldGenerateSummaryItinerary = false;
-  let summaryItineraryOutputFile = null;
-  let filename = null;
-
-  for (let argIndex = 0; argIndex < args.length; argIndex++) {
-    let arg = args[argIndex];
-
-    if (flagsOn && arg.startsWith("-")) {
-      let argumentHandled = false;
-      if (arg === "--") {
-        argumentHandled = true;
-        flagsOn = false;
-      }
-
-      if (arg === "--full") {
-        argumentHandled = true;
-        shouldGenerateFullItinerary = true;
-      }
-
-      if (arg === "--full-out") {
-        argumentHandled = true;
-        shouldGenerateFullItinerary = true;
-        argIndex++;
-        if (argIndex >= args.length)
-          throw new Error("--full-out requires file name");
-        fullItineraryOutputFile = args[argIndex];
-      }
-
-      if (arg === "--individual") {
-        argumentHandled = true;
-        shouldGenerateIndividualItinerary = true;
-      }
-
-      if (arg === "--individual-out") {
-        argumentHandled = true;
-        shouldGenerateIndividualItinerary = true;
-        argIndex++;
-        if (argIndex >= args.length)
-          throw new Error("--individual-out requires file name");
-        individualItineraryOutputFile = args[argIndex];
-      }
-
-      if (arg === "--summary") {
-        argumentHandled = true;
-        shouldGenerateSummaryItinerary = true;
-      }
-
-      if (arg === "--summary-out") {
-        argumentHandled = true;
-        shouldGenerateSummaryItinerary = true;
-        argIndex++;
-        if (argIndex >= args.length)
-          throw new Error("--summary-out requires file name");
-        summaryItineraryOutputFile = args[argIndex];
-      }
-
-      if (!argumentHandled) throw new Error("unknown option: " + arg);
-    } else {
-      if (filename !== null) {
-        throw new Error("only supports one file");
-      }
-
-      filename = arg;
-    }
-  }
-
-  if (!filename) {
-    throw new Error("missing required filename");
-  }
-
-  let data = loadData(filename);
-
-  if (
-    !shouldGenerateFullItinerary &&
-    !shouldGenerateIndividualItinerary &&
-    !shouldGenerateSummaryItinerary
-  ) {
-    throw new Error(
-      "no outputs selected, use --full or --individual or --summary"
-    );
-  }
-
-  if (shouldGenerateFullItinerary) {
-    fullItineraryOutputFile ??= "full-itinerary.docx";
-    generateFullItinerary(data, fullItineraryOutputFile);
-  }
-
-  if (shouldGenerateIndividualItinerary) {
-    individualItineraryOutputFile ??= "individual-itineraries.docx";
-    generateIndividualItineraries(data, individualItineraryOutputFile);
-  }
-
-  if (shouldGenerateSummaryItinerary) {
-    summaryItineraryOutputFile ??= "summary-itinerary.docx";
-    generateSummaryItinerary(data, summaryItineraryOutputFile);
-  }
-}
-
-main();
