@@ -366,7 +366,10 @@ export type LoadDataOptions = {
       };
 };
 
-export function loadData(input: Buffer, opts: LoadDataOptions): Data {
+export function loadData(
+  input: Buffer | ArrayBuffer,
+  opts: LoadDataOptions
+): Data {
   // let workbook = xlsx.readFile(filename, { dense: true });
   let workbook = xlsxRead(input, { dense: true });
 
@@ -808,7 +811,7 @@ export function generateFullItinerary(data: Data) {
       }),
     });
   }
-  return Packer.toBuffer(doc);
+  return doc;
 }
 
 export function generateIndividualItineraries(data: Data) {
@@ -826,7 +829,7 @@ export function generateIndividualItineraries(data: Data) {
     sections,
   });
 
-  return Packer.toBuffer(doc);
+  return doc;
 
   function generateIndividualItinerarySection(
     individual: Participant
@@ -1139,7 +1142,7 @@ export function generateSummaryItinerary(data: Data) {
     ],
   });
 
-  return Packer.toBuffer(doc);
+  return doc;
 }
 
 function Section({

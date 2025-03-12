@@ -8,17 +8,16 @@ import {
   type LoadDataOptions,
   type Data,
 } from "./generate-documents.ts";
+import { Packer, type Document } from "docx";
 
 function loadDataFromFile(inputFileName: string, options: LoadDataOptions) {
   let content = fs.readFileSync(inputFileName);
   return loadData(content, options);
 }
 
-async function generateDocumentToFile(
-  fn: () => Promise<Buffer>,
-  fileName: string
-) {
-  let content = await fn();
+async function generateDocumentToFile(fn: () => Document, fileName: string) {
+  let doc = fn();
+  let content = await Packer.toBuffer(doc);
   fs.writeFileSync(fileName, content);
 }
 
@@ -46,7 +45,7 @@ function generateSummaryItineraryToFile(data: Data, outputFileName: string) {
   );
 }
 
-function main() {
+async function main() {
   let args = process.argv.slice(2);
 
   let flagsOn = true;
@@ -143,20 +142,33 @@ function main() {
     );
   }
 
+  let tasks: Promise<void>[] = [];
+
   if (shouldGenerateFullItinerary) {
     fullItineraryOutputFile ??= "full-itinerary.docx";
-    generateFullItineraryToFile(data, fullItineraryOutputFile);
+    tasks.push(generateFullItineraryToFile(data, fullItineraryOutputFile));
   }
 
   if (shouldGenerateIndividualItinerary) {
     individualItineraryOutputFile ??= "individual-itineraries.docx";
-    generateIndividualItinerariesToFile(data, individualItineraryOutputFile);
+    tasks.push(
+      generateIndividualItinerariesToFile(data, individualItineraryOutputFile)
+    );
   }
 
   if (shouldGenerateSummaryItinerary) {
     summaryItineraryOutputFile ??= "summary-itinerary.docx";
-    generateSummaryItineraryToFile(data, summaryItineraryOutputFile);
+    tasks.push(
+      generateSummaryItineraryToFile(data, summaryItineraryOutputFile)
+    );
+  }
+
+  let results = await Promise.allSettled(tasks);
+  for (let result of results) {
+    if (result.status === "rejected") {
+      throw result.reason;
+    }
   }
 }
 
-main();
+await main();

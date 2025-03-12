@@ -2,3 +2,4 @@ node_modules/
 *.docx
 *.xlsx
 *.zip
+dist/
