@@ -128,6 +128,10 @@ let generateSummaryItineraryButton = document.getElementById(
   "generate-summary-itinerary"
 )! as HTMLButtonElement;
 
+let generateSummaryWithRolesButton = document.getElementById(
+  "generate-summary-with-roles"
+)! as HTMLButtonElement;
+
 setupButton(
   generateFullItineraryButton,
   generateFullItinerary,
@@ -140,8 +144,13 @@ setupButton(
 );
 setupButton(
   generateSummaryItineraryButton,
-  generateSummaryItinerary,
+  (data) => generateSummaryItinerary(data, false),
   "summary-itinerary.docx"
+);
+setupButton(
+  generateSummaryWithRolesButton,
+  (data) => generateSummaryItinerary(data, true),
+  "summary-itinerary-with-roles.docx"
 );
 
 function setupButton(

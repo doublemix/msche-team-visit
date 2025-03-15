@@ -262,6 +262,8 @@ export type ProposedMeeting = {
   standard7TeamMember: boolean;
   individuals: { displayName: string; id: string }[];
   hideNames: boolean;
+  drivers: string;
+  teamRoles: string;
 };
 
 export type ZoomRoom = {
@@ -492,6 +494,8 @@ export function loadData(
         (x: string[]) => x.map((entry: string) => displayNameAndId(entry)),
       ],
       hideNames: ["Hide Names", boolean],
+      drivers: /^drivers/i,
+      teamRoles: /^host \(h\)/i,
     }
   );
 
@@ -1028,20 +1032,39 @@ function separated<T, R>(
   return results;
 }
 
-export function generateSummaryItinerary(data: Data) {
+export function generateSummaryItinerary(
+  data: Data,
+  shouldIncludeRoles: boolean
+) {
   let { proposedMeetingsData, zoomRoomsByName } = data;
   let proposedMeetingsGroupedByDate = groupBy(
     proposedMeetingsData,
     (x) => x.date
   );
 
+  let landscape = shouldIncludeRoles;
+
+  let headerTitle: CustomSectionOptions["headerTitle"] = shouldIncludeRoles
+    ? "Summary Itinerary with Roles"
+    : [
+        "Summary Itinerary and Key Contacts",
+        "Summary Itinerary & Key Contacts",
+      ];
+
+  let columnWidths: number[] = shouldIncludeRoles
+    ? [
+        twips.fromInches(1.5),
+        twips.fromInches(2.5),
+        twips.fromInches(2.5),
+        twips.fromInches(3.5),
+      ]
+    : [twips.fromInches(1.5), twips.fromInches(3.0), twips.fromInches(3.0)];
+
   let doc = new Document({
     sections: [
       Section({
-        headerTitle: [
-          "Summary Itinerary and Key Contacts",
-          "Summary Itinerary & Key Contacts",
-        ],
+        landscape,
+        headerTitle,
         children: [
           ...separated(
             proposedMeetingsGroupedByDate,
@@ -1053,11 +1076,7 @@ export function generateSummaryItinerary(data: Data) {
 
               return new Table({
                 layout: "fixed",
-                columnWidths: [
-                  twips.fromInches(1.5),
-                  twips.fromInches(3.0),
-                  twips.fromInches(3.0),
-                ],
+                columnWidths,
                 margins: {
                   left: twips.fromInches(0.1),
                   right: twips.fromInches(0.1),
@@ -1069,7 +1088,11 @@ export function generateSummaryItinerary(data: Data) {
                   new TableRow({
                     tableHeader: true,
                     cantSplit: true,
-                    children: [HeaderTableCell(group.key, { columnSpan: 3 })],
+                    children: [
+                      HeaderTableCell(group.key, {
+                        columnSpan: shouldIncludeRoles ? 4 : 3,
+                      }),
+                    ],
                   }),
                   new TableRow({
                     tableHeader: true,
@@ -1078,6 +1101,9 @@ export function generateSummaryItinerary(data: Data) {
                       HeaderTableCell("Time"),
                       HeaderTableCell("Meeting"),
                       HeaderTableCell("Location"),
+                      ...(shouldIncludeRoles
+                        ? [HeaderTableCell("Team Roles")]
+                        : []),
                     ],
                   }),
                   ...proposedMeetingsGroupedByTime.flatMap((group) => {
@@ -1122,6 +1148,24 @@ export function generateSummaryItinerary(data: Data) {
                           })
                         )
                       );
+                      if (shouldIncludeRoles) {
+                        row.push(
+                          NormalTableCell(
+                            iife(() => {
+                              let results: (string | IParagraphOptions)[] = [];
+
+                              if (meeting.drivers) {
+                                results.push(`Drivers: ${meeting.drivers}`);
+                              }
+                              if (meeting.teamRoles) {
+                                results.push(`Roles: ${meeting.teamRoles}`);
+                              }
+
+                              return results;
+                            })
+                          )
+                        );
+                      }
                       rows.push(
                         new TableRow({
                           cantSplit: true,
@@ -1145,19 +1189,23 @@ export function generateSummaryItinerary(data: Data) {
   return doc;
 }
 
-function Section({
-  headerTitle,
-  children,
-}: {
+type CustomSectionOptions = {
+  landscape?: boolean;
   headerTitle: string | [string, string];
   children: ISectionOptions["children"];
-}): ISectionOptions {
+};
+
+function Section({
+  landscape,
+  headerTitle,
+  children,
+}: CustomSectionOptions): ISectionOptions {
   return {
     properties: {
       page: {
         size: {
-          width: "8.5in",
-          height: "11in",
+          width: landscape ? "11in" : "8.5in",
+          height: landscape ? "8.5in" : "11in",
         },
         margin: {
           left: "0.5in",
@@ -1171,7 +1219,7 @@ function Section({
       },
       titlePage: true,
     },
-    headers: CommonHeader({ title: headerTitle }),
+    headers: CommonHeader({ title: headerTitle, landscape }),
     children,
   };
 }
@@ -1179,9 +1227,11 @@ function Section({
 function CommonHeader({
   mainTitle = "MSCHE Team Visit",
   title,
+  landscape = false,
 }: {
   mainTitle?: string;
   title: string | [string, string];
+  landscape?: boolean;
 }): ISectionOptions["headers"] {
   let firstPageHeaderTitle, defaultHeaderTitle;
 
@@ -1213,6 +1263,7 @@ function CommonHeader({
     default: new Header({
       children: [
         DefaultHeaderParagraph({
+          landscape,
           children: [
             mainTitle,
             new Tab(),
@@ -1222,13 +1273,18 @@ function CommonHeader({
           ],
         }),
         DefaultHeaderParagraph({
+          landscape,
           text: "",
         }),
       ],
     }),
   };
 
-  function DefaultHeaderParagraph(props: HeaderParagraphProps) {
+  function DefaultHeaderParagraph(
+    props: HeaderParagraphProps & { landscape: boolean }
+  ) {
+    let { landscape, ...otherProps } = props;
+
     return HeaderParagraphCore({
       alignment: AlignmentType.LEFT,
       size: "10pt",
@@ -1236,10 +1292,13 @@ function CommonHeader({
       spacingAfter: 0,
       tabStops: [
         { type: "left", position: 0 },
-        { type: "right", position: twips.fromInches(7.5) },
+        {
+          type: "right",
+          position: landscape ? twips.fromInches(10) : twips.fromInches(7.5),
+        },
       ],
 
-      ...props,
+      ...otherProps,
     });
   }
 

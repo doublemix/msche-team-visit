@@ -38,9 +38,13 @@ function generateIndividualItinerariesToFile(
   );
 }
 
-function generateSummaryItineraryToFile(data: Data, outputFileName: string) {
+function generateSummaryItineraryToFile(
+  data: Data,
+  outputFileName: string,
+  shouldIncludeRoles: boolean
+) {
   return generateDocumentToFile(
-    () => generateSummaryItinerary(data),
+    () => generateSummaryItinerary(data, shouldIncludeRoles),
     outputFileName
   );
 }
@@ -54,6 +58,7 @@ async function main() {
   let shouldGenerateIndividualItinerary = false;
   let individualItineraryOutputFile = null;
   let shouldGenerateSummaryItinerary = false;
+  let shouldIncludeRoles = false;
   let summaryItineraryOutputFile = null;
   let filename = null;
 
@@ -109,6 +114,11 @@ async function main() {
         summaryItineraryOutputFile = args[argIndex];
       }
 
+      if (arg === "--roles") {
+        shouldIncludeRoles = true;
+        argumentHandled = true;
+      }
+
       if (!argumentHandled) throw new Error("unknown option: " + arg);
     } else {
       if (filename !== null) {
@@ -142,6 +152,12 @@ async function main() {
     );
   }
 
+  if (shouldIncludeRoles && !shouldGenerateSummaryItinerary) {
+    throw new Error(
+      "--roles may only be specified with --summary or --sumary-out"
+    );
+  }
+
   let tasks: Promise<void>[] = [];
 
   if (shouldGenerateFullItinerary) {
@@ -157,9 +173,16 @@ async function main() {
   }
 
   if (shouldGenerateSummaryItinerary) {
-    summaryItineraryOutputFile ??= "summary-itinerary.docx";
+    summaryItineraryOutputFile ??= shouldIncludeRoles
+      ? "summary-with-roles.docx"
+      : "summary-itinerary.docx";
+
     tasks.push(
-      generateSummaryItineraryToFile(data, summaryItineraryOutputFile)
+      generateSummaryItineraryToFile(
+        data,
+        summaryItineraryOutputFile,
+        shouldIncludeRoles
+      )
     );
   }
 
