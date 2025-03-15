@@ -262,7 +262,6 @@ export type ProposedMeeting = {
   standard7TeamMember: boolean;
   individuals: { displayName: string; id: string }[];
   hideNames: boolean;
-  drivers: string;
   teamRoles: string;
 };
 
@@ -494,8 +493,7 @@ export function loadData(
         (x: string[]) => x.map((entry: string) => displayNameAndId(entry)),
       ],
       hideNames: ["Hide Names", boolean],
-      drivers: /^drivers/i,
-      teamRoles: /^host \(h\)/i,
+      teamRoles: /host \(h\)/i,
     }
   );
 
@@ -1149,22 +1147,7 @@ export function generateSummaryItinerary(
                         )
                       );
                       if (shouldIncludeRoles) {
-                        row.push(
-                          NormalTableCell(
-                            iife(() => {
-                              let results: (string | IParagraphOptions)[] = [];
-
-                              if (meeting.drivers) {
-                                results.push(`Drivers: ${meeting.drivers}`);
-                              }
-                              if (meeting.teamRoles) {
-                                results.push(`Roles: ${meeting.teamRoles}`);
-                              }
-
-                              return results;
-                            })
-                          )
-                        );
+                        row.push(NormalTableCell(meeting.teamRoles));
                       }
                       rows.push(
                         new TableRow({
