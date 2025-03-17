@@ -58,8 +58,9 @@ async function main() {
   let shouldGenerateIndividualItinerary = false;
   let individualItineraryOutputFile = null;
   let shouldGenerateSummaryItinerary = false;
-  let shouldIncludeRoles = false;
   let summaryItineraryOutputFile = null;
+  let shouldGenerateSummaryItineraryWithRoles = false;
+  let summaryItineraryWithRolesOutputFile = null;
   let filename = null;
 
   for (let argIndex = 0; argIndex < args.length; argIndex++) {
@@ -115,8 +116,17 @@ async function main() {
       }
 
       if (arg === "--roles") {
-        shouldIncludeRoles = true;
         argumentHandled = true;
+        shouldGenerateSummaryItineraryWithRoles = true;
+      }
+
+      if (arg === "--roles-out") {
+        argumentHandled = true;
+        shouldGenerateSummaryItineraryWithRoles = true;
+        argIndex++;
+        if (argIndex >= args.length)
+          throw new Error("--roles-out requires file name");
+        summaryItineraryWithRolesOutputFile = args[argIndex];
       }
 
       if (!argumentHandled) throw new Error("unknown option: " + arg);
@@ -145,16 +155,11 @@ async function main() {
   if (
     !shouldGenerateFullItinerary &&
     !shouldGenerateIndividualItinerary &&
-    !shouldGenerateSummaryItinerary
+    !shouldGenerateSummaryItinerary &&
+    !shouldGenerateSummaryItineraryWithRoles
   ) {
     throw new Error(
-      "no outputs selected, use --full or --individual or --summary"
-    );
-  }
-
-  if (shouldIncludeRoles && !shouldGenerateSummaryItinerary) {
-    throw new Error(
-      "--roles may only be specified with --summary or --sumary-out"
+      "no outputs selected, use --full or --individual or --summary or --roles"
     );
   }
 
@@ -173,15 +178,19 @@ async function main() {
   }
 
   if (shouldGenerateSummaryItinerary) {
-    summaryItineraryOutputFile ??= shouldIncludeRoles
-      ? "summary-with-roles.docx"
-      : "summary-itinerary.docx";
+    summaryItineraryOutputFile ??= "summary-itinerary.docx";
+    tasks.push(
+      generateSummaryItineraryToFile(data, summaryItineraryOutputFile, false)
+    );
+  }
 
+  if (shouldGenerateSummaryItineraryWithRoles) {
+    summaryItineraryWithRolesOutputFile ??= "summary-itinerary-with-roles.docx";
     tasks.push(
       generateSummaryItineraryToFile(
         data,
-        summaryItineraryOutputFile,
-        shouldIncludeRoles
+        summaryItineraryWithRolesOutputFile,
+        true
       )
     );
   }
