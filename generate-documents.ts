@@ -511,12 +511,34 @@ export function loadData(
   };
 }
 
-export function generateFullItinerary(data: Data) {
-  const { proposedMeetingsData, participantListData, zoomRoomsByName } = data;
-
+function getParticipantTeamMembers(
+  participantListData: Participant[],
+  meeting: ProposedMeeting
+) {
   let allTeamMembers = participantListData.filter(
     (p) => p.teamMemberRoles.length >= 1
   );
+
+  let teamMembers = participantListData.filter((p) => {
+    for (let d of teamMemberDefinitions) {
+      if (meeting[d.property] && p.teamMemberRoles.includes(d.value)) {
+        return true;
+      }
+    }
+
+    return false;
+  });
+
+  let isAllTeamMembers = teamMembers.length === allTeamMembers.length;
+
+  return {
+    isAllTeamMembers,
+    teamMembers,
+  };
+}
+
+export function generateFullItinerary(data: Data) {
+  const { proposedMeetingsData, participantListData, zoomRoomsByName } = data;
 
   let proposedMeetingsGroupedByDate = groupBy(
     proposedMeetingsData,
@@ -692,25 +714,13 @@ export function generateFullItinerary(data: Data) {
 
                 ...iife(() => {
                   if (meeting.hideNames) return [];
-                  let teamMembers = participantListData.filter((p) => {
-                    for (let d of teamMemberDefinitions) {
-                      if (
-                        meeting[d.property] &&
-                        p.teamMemberRoles.includes(d.value)
-                      ) {
-                        return true;
-                      }
-                    }
 
-                    return false;
-                  });
+                  let { teamMembers, isAllTeamMembers } =
+                    getParticipantTeamMembers(participantListData, meeting);
 
                   if (teamMembers.length < 1) {
                     return [];
                   }
-
-                  let isAllTeamMembers =
-                    teamMembers.length === allTeamMembers.length;
 
                   return [
                     new Paragraph({
@@ -1122,7 +1132,40 @@ export function generateSummaryItinerary(
                           hideTopBorder: !isFirst,
                           keepNext: !isLast,
                         }),
-                        NormalTableCell(meeting.interviewAssignments),
+                        NormalTableCell(
+                          iife(() => {
+                            let results: (string | IParagraphOptions)[] = [];
+                            results.push(meeting.interviewAssignments);
+
+                            if (shouldIncludeRoles) {
+                              let { teamMembers, isAllTeamMembers } =
+                                getParticipantTeamMembers(
+                                  data.participantListData,
+                                  meeting
+                                );
+
+                              let teamMemberStr = isAllTeamMembers
+                                ? "All Team Members"
+                                : teamMembers.length === 0
+                                ? "None"
+                                : teamMembers
+                                    .map((teamMember) => teamMember.fullName)
+                                    .join(", ");
+
+                              results.push({
+                                children: [
+                                  new TextRun({
+                                    italics: true,
+                                    size: "8pt",
+                                    text: `Team: ${teamMemberStr}`,
+                                  }),
+                                ],
+                              });
+                            }
+
+                            return results;
+                          })
+                        ),
                         NormalTableCell(
                           iife(() => {
                             let results: (string | IParagraphOptions)[] = [];
