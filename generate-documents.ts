@@ -1,7 +1,13 @@
 /** @jsx h
  *  @jsxFrag hFrag */
 
-import { utils as xlsxUtils, read as xlsxRead, type WorkBook } from "xlsx";
+import {
+  utils as xlsxUtils,
+  read as xlsxRead,
+  type WorkBook,
+  type WorkSheet,
+  type CellObject,
+} from "xlsx";
 import {
   AlignmentType,
   BorderStyle,
@@ -24,6 +30,70 @@ import {
   TextRun,
   WidthType,
 } from "docx";
+import { parse as parseSimpleHtml } from "./simple-html.js";
+
+type SimpleHtml = SimpleHtmlContentNode[];
+type SimpleHtmlContentNode =
+  | { type: "text"; value: string }
+  | {
+      type: "tag";
+      tagName: string;
+      attributes: { name: string; value: string }[];
+      content: SimpleHtml;
+    };
+
+function formatSimpleHtml(html: SimpleHtml) {
+  let results: TextRun[] = [];
+
+  helper(html, {});
+
+  return results;
+
+  function helper(
+    html: SimpleHtml,
+    activeOptions: { bold?: true; italics?: true; underline?: true }
+  ) {
+    for (let item of html) {
+      switch (item.type) {
+        case "text": {
+          results.push(
+            new TextRun({
+              bold: activeOptions.bold,
+              italics: activeOptions.italics,
+              underline: activeOptions.underline && {
+                type: "single",
+              },
+              text: item.value,
+            })
+          );
+          break;
+        }
+        case "tag": {
+          let { tagName, content } = item;
+
+          let newActiveOptions = { ...activeOptions };
+
+          if (tagName === "b") {
+            newActiveOptions.bold = true;
+          }
+
+          if (tagName === "i") {
+            newActiveOptions.italics = true;
+          }
+
+          if (tagName === "u") {
+            newActiveOptions.underline = true;
+          }
+
+          helper(content, newActiveOptions);
+          break;
+        }
+        default:
+          throw new Error("unhandled type: " + (item as any).type);
+      }
+    }
+  }
+}
 
 function _throw(err: any) {
   throw err;
@@ -86,7 +156,11 @@ type WorkSheetRequest =
   | string
   | {
       name: string;
-      range?: any;
+      range?: number;
+      additionalColumns?: (
+        w: WorkSheet,
+        cs: Record<string, number>
+      ) => (r: number) => Record<string, any>;
     };
 function getWorksheets(
   workbook: WorkBook,
@@ -97,11 +171,28 @@ function getWorksheets(
       req = { name: req };
     }
     let worksheet = workbook.Sheets[req.name];
-    return xlsxUtils.sheet_to_json<Record<string, string>>(worksheet, {
+    let parsed = xlsxUtils.sheet_to_json<Record<string, string>>(worksheet, {
       defval: "",
       skipHidden: true,
       range: req.range,
     });
+    if (req.additionalColumns) {
+      let r = xlsxUtils.decode_range(worksheet["!ref"]!);
+      let row = req.range ?? 0;
+      let columnNames: Record<string, number> = {};
+      for (let column = r.s.c; column < r.e.c; column++) {
+        let cell: CellObject = worksheet[row][column];
+        columnNames[cell.w!] = column;
+      }
+
+      let additionalColumns = req.additionalColumns(worksheet, columnNames);
+
+      for (let row of parsed) {
+        let additional = additionalColumns(row.__rowNum__ as unknown as number);
+        Object.assign(row, additional);
+      }
+    }
+    return parsed;
   });
 }
 
@@ -175,7 +266,11 @@ function mapFields<T>(data: any[], mapper: Record<string, Mapper>): T[] {
 function mapField(data: any, mapper: Mapper): any {
   if (typeof mapper === "string") {
     if (!(mapper in data)) throw new Error(`Field ${mapper} not found in data`);
-    return data[mapper]?.trim() ?? "";
+    let value = data[mapper];
+    if (typeof value === "string") {
+      return value.trim();
+    }
+    return value ?? "";
   } else if (mapper instanceof RegExp) {
     let candidateKeys = Object.keys(data).filter((key) => key.match(mapper));
     if (candidateKeys.length === 0)
@@ -263,6 +358,7 @@ export type ProposedMeeting = {
   individuals: { displayName: string; id: string }[];
   hideNames: boolean;
   teamRoles: string;
+  teamRolesData: SimpleHtml | null;
 };
 
 export type ZoomRoom = {
@@ -367,6 +463,25 @@ export type LoadDataOptions = {
       };
 };
 
+function getColumnIndex(
+  matcher: string | RegExp,
+  columnMap: Record<string, number>
+) {
+  let keys = Object.keys(columnMap);
+
+  let matched = keys.filter((k) => k.match(matcher));
+
+  if (matched.length < 1) {
+    throw new Error("column not found: " + matcher);
+  }
+
+  if (matched.length !== 1) {
+    throw new Error("multiple columns found: " + matcher);
+  }
+
+  return columnMap[matched[0]];
+}
+
 export function loadData(
   input: Buffer | ArrayBuffer,
   opts: LoadDataOptions
@@ -376,7 +491,26 @@ export function loadData(
 
   let [proposedMeetingsRawData, participantListRawData, zoomRoomsRawData] =
     getWorksheets(workbook, [
-      { name: "Proposed Meetings-MSCHE Team", range: opts.meetingRange },
+      {
+        name: "Proposed Meetings-MSCHE Team",
+        range: opts.meetingRange,
+        additionalColumns: (w, cs) => {
+          let rolesColumnIndex = getColumnIndex(/host \(h\)/i, cs);
+          return (r) => {
+            let cell = w[r][rolesColumnIndex];
+            let parsed: SimpleHtml | null = null;
+
+            if (cell?.h) {
+              try {
+                parsed = parseSimpleHtml(cell?.h);
+              } catch (err) {
+                console.error("Error while parsing html: " + cell?.h, err);
+              }
+            }
+            return { "Formatted roles": parsed };
+          };
+        },
+      },
       "Participant List",
       "Zoom Rooms",
     ]);
@@ -494,6 +628,7 @@ export function loadData(
       ],
       hideNames: ["Hide Names", boolean],
       teamRoles: /host \(h\)/i,
+      teamRolesData: "Formatted roles",
     }
   );
 
@@ -1190,7 +1325,31 @@ export function generateSummaryItinerary(
                         )
                       );
                       if (shouldIncludeRoles) {
-                        row.push(NormalTableCell(meeting.teamRoles));
+                        let generated = false;
+                        try {
+                          if (meeting.teamRolesData) {
+                            let formatted = formatSimpleHtml(
+                              meeting.teamRolesData
+                            );
+                            row.push(
+                              NormalTableCell([
+                                {
+                                  children: formatted,
+                                },
+                              ])
+                            );
+                            generated = true;
+                          }
+                        } catch (err) {
+                          console.log(
+                            "err while trying output formatted roles: ",
+                            err
+                          );
+                        }
+                        if (!generated) {
+                          row.push(NormalTableCell("@" + meeting.teamRoles));
+                          generated = true;
+                        }
                       }
                       rows.push(
                         new TableRow({

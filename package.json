@@ -9,7 +9,9 @@
   "scripts": {
     "build": "webpack --mode production",
     "dev": "webpack serve --mode development",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "peggy:generate": "peggy simple-html.peggy --dts --format es",
+    "peggy:dev": "peggy simple-html.peggy --dts --format es --watch"
   },
   "keywords": [],
   "author": "",
@@ -20,6 +22,7 @@
     "clean-webpack-plugin": "^4.0.0",
     "html-webpack-plugin": "^5.6.3",
     "patch-package": "^8.0.0",
+    "peggy": "^4.2.0",
     "ts-loader": "^9.5.2",
     "typescript": "^5.7.3",
     "webpack-cli": "^6.0.1",
