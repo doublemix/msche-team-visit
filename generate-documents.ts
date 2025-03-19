@@ -1,6 +1,3 @@
-/** @jsx h
- *  @jsxFrag hFrag */
-
 import {
   utils as xlsxUtils,
   read as xlsxRead,
@@ -30,68 +27,93 @@ import {
   TextRun,
   WidthType,
 } from "docx";
-import { parse as parseSimpleHtml } from "./simple-html.js";
+import { parse as parseSimpleXml } from "./simple-xml.js";
 
-type SimpleHtml = SimpleHtmlContentNode[];
-type SimpleHtmlContentNode =
-  | { type: "text"; value: string }
-  | {
-      type: "tag";
-      tagName: string;
-      attributes: { name: string; value: string }[];
-      content: SimpleHtml;
-    };
+type SimpleXml = SimpleXmlNode[];
+type SimpleXmlNode = SimpleXmlTextNode | SimpleXmlTagNode;
+type SimpleXmlTextNode = { type: "text"; value: string };
+type SimpleXmlTagNode = {
+  type: "tag";
+  tagName: string;
+  attributes: { name: string; value: string }[];
+  content: SimpleXml;
+};
 
-function formatSimpleHtml(html: SimpleHtml) {
+function formatSimpleXml(xml: SimpleXml) {
+  type ActiveOptions = { bold?: true; italics?: true; underline?: true };
+
   let results: TextRun[] = [];
+  let defaultOptions: ActiveOptions = {};
 
-  helper(html, {});
+  handleContent();
 
   return results;
 
-  function helper(
-    html: SimpleHtml,
-    activeOptions: { bold?: true; italics?: true; underline?: true }
-  ) {
-    for (let item of html) {
-      switch (item.type) {
-        case "text": {
-          results.push(
-            new TextRun({
-              bold: activeOptions.bold,
-              italics: activeOptions.italics,
-              underline: activeOptions.underline && {
-                type: "single",
-              },
-              text: item.value,
-            })
-          );
-          break;
-        }
-        case "tag": {
-          let { tagName, content } = item;
+  function handleContent() {
+    for (let item of xml) {
+      // expect `r` tag`
+      if (throwOnNonEmptyText(item)) continue;
+      if (item.tagName === "r") handleRTag(item.content);
+      else if (item.tagName === "t")
+        generateTextNodeWithOptions(item.content, defaultOptions);
+      else throw new Error("unexpected tag at top-level: " + item.tagName);
+    }
+  }
 
-          let newActiveOptions = { ...activeOptions };
+  function handleRTag(content: SimpleXml) {
+    let textNodes: SimpleXmlTagNode[] = [];
+    let runPropertiesNodes: SimpleXmlTagNode[] = [];
+    for (let item of content) {
+      if (throwOnNonEmptyText(item)) continue;
+      if (item.tagName === "rPr") {
+        runPropertiesNodes.push(item);
+      } else if (item.tagName === "t") {
+        textNodes.push(item);
+      } else throw new Error("unexpected tag in `r` tag: " + item.tagName);
+    }
 
-          if (tagName === "b") {
-            newActiveOptions.bold = true;
-          }
+    let activeOptions: ActiveOptions = {};
 
-          if (tagName === "i") {
-            newActiveOptions.italics = true;
-          }
-
-          if (tagName === "u") {
-            newActiveOptions.underline = true;
-          }
-
-          helper(content, newActiveOptions);
-          break;
-        }
-        default:
-          throw new Error("unhandled type: " + (item as any).type);
+    for (let runPropertiesNode of runPropertiesNodes) {
+      for (let item of runPropertiesNode.content) {
+        if (throwOnNonEmptyText(item)) continue;
+        if (item.tagName === "b") activeOptions.bold = true;
+        if (item.tagName === "i") activeOptions.italics = true;
+        if (item.tagName === "u") activeOptions.underline = true;
+        // ignore other tagNames, we aren't concerned with them
       }
     }
+
+    for (let textNode of textNodes) {
+      generateTextNodeWithOptions(textNode.content, activeOptions);
+    }
+  }
+
+  function generateTextNodeWithOptions(
+    content: SimpleXml,
+    activeOptions: ActiveOptions
+  ) {
+    for (let item of content) {
+      if (item.type !== "text") throw new Error("only expecting text content");
+      results.push(
+        new TextRun({
+          bold: activeOptions.bold,
+          italics: activeOptions.italics,
+          underline: activeOptions.underline && {
+            type: "single",
+          },
+          text: item.value,
+        })
+      );
+    }
+  }
+
+  function throwOnNonEmptyText(node: SimpleXmlNode): node is SimpleXmlTextNode {
+    if (node.type !== "text") return false;
+    if (node.value.trim() !== "") {
+      throw new Error("unexpected text");
+    }
+    return true;
   }
 }
 
@@ -358,7 +380,7 @@ export type ProposedMeeting = {
   individuals: { displayName: string; id: string }[];
   hideNames: boolean;
   teamRoles: string;
-  teamRolesData: SimpleHtml | null;
+  teamRolesData: SimpleXml | null;
 };
 
 export type ZoomRoom = {
@@ -498,13 +520,13 @@ export function loadData(
           let rolesColumnIndex = getColumnIndex(/host \(h\)/i, cs);
           return (r) => {
             let cell = w[r][rolesColumnIndex];
-            let parsed: SimpleHtml | null = null;
+            let parsed: SimpleXml | null = null;
 
             if (cell?.h) {
               try {
-                parsed = parseSimpleHtml(cell?.h);
+                parsed = parseSimpleXml(cell?.r);
               } catch (err) {
-                console.error("Error while parsing html: " + cell?.h, err);
+                console.error("Error while parsing XML: " + cell?.h, err);
               }
             }
             return { "Formatted roles": parsed };
@@ -1328,7 +1350,7 @@ export function generateSummaryItinerary(
                         let generated = false;
                         try {
                           if (meeting.teamRolesData) {
-                            let formatted = formatSimpleHtml(
+                            let formatted = formatSimpleXml(
                               meeting.teamRolesData
                             );
                             row.push(
@@ -1347,7 +1369,7 @@ export function generateSummaryItinerary(
                           );
                         }
                         if (!generated) {
-                          row.push(NormalTableCell("@" + meeting.teamRoles));
+                          row.push(NormalTableCell(meeting.teamRoles));
                           generated = true;
                         }
                       }

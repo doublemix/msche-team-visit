@@ -7,11 +7,11 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "build": "webpack --mode production",
+    "build": "npm run peggy:generate && webpack --mode production",
     "dev": "webpack serve --mode development",
     "postinstall": "patch-package",
-    "peggy:generate": "peggy simple-html.peggy --dts --format es",
-    "peggy:dev": "peggy simple-html.peggy --dts --format es --watch"
+    "peggy:generate": "peggy simple-xml.peggy --dts --format es",
+    "peggy:dev": "peggy simple-xml.peggy --dts --format es --watch"
   },
   "keywords": [],
   "author": "",

@@ -3,5 +3,5 @@ node_modules/
 *.xlsx
 *.zip
 dist/
-simple-html.js
-simple-html.d.ts
+simple-xml.js
+simple-xml.d.ts
