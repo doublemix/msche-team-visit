@@ -5,7 +5,13 @@ import {
   type Data,
   generateIndividualItineraries,
   generateSummaryItinerary,
+  MessageCollector,
+  UserError,
 } from "./generate-documents.ts";
+
+function iife<T>(fn: () => T): T {
+  return fn();
+}
 
 class Observable<T> {
   value: T;
@@ -99,10 +105,24 @@ function loadDataFromFile(file: File) {
   let reader = new FileReader();
   reader.onload = function (event) {
     let fileData = event.target?.result as ArrayBuffer;
-    let loadedData = loadData(fileData, {
-      teamRoleSource: { type: "meetingsTable", nameRow: 0, headerRow: 2 },
-      meetingRange: 2,
-    });
+
+    let messageCollector = new MessageCollector();
+
+    let loadedDataResult = tryWithMessageCollector(
+      () =>
+        loadData(
+          fileData,
+          {
+            teamRoleSource: { type: "meetingsTable", nameRow: 0, headerRow: 2 },
+            meetingRange: 2,
+          },
+          messageCollector
+        ),
+      messageCollector
+    );
+    updateMessages(messageCollector);
+    if (!loadedDataResult.success) return;
+    let loadedData = loadedDataResult.value;
     loadedDataRef.update(loadedData);
   };
   reader.readAsArrayBuffer(file);
@@ -144,24 +164,59 @@ setupButton(
 );
 setupButton(
   generateSummaryItineraryButton,
-  (data) => generateSummaryItinerary(data, false),
+  (data, messageCollector) =>
+    generateSummaryItinerary(data, false, messageCollector),
   "summary-itinerary.docx"
 );
 setupButton(
   generateSummaryWithRolesButton,
-  (data) => generateSummaryItinerary(data, true),
+  (data, messageCollector) =>
+    generateSummaryItinerary(data, true, messageCollector),
   "summary-itinerary-with-roles.docx"
 );
 
+type Result<T> = { success: true; value: T } | { success: false };
+function tryWithMessageCollector<T>(
+  fn: () => T,
+  messageCollector: MessageCollector
+): Result<T> {
+  try {
+    return { success: true, value: fn() };
+  } catch (err) {
+    if (err instanceof Error && !(err instanceof UserError)) {
+      messageCollector.codeError(err);
+    } else if (err instanceof Error) {
+      messageCollector.error(err.message);
+    } else {
+      messageCollector.warn(`${err}`);
+    }
+    return { success: false };
+  }
+}
+
 function setupButton(
   button: HTMLButtonElement,
-  documentGenerator: (data: Data) => DocxDocument,
+  documentGenerator: (
+    data: Data,
+    messageCollector: MessageCollector
+  ) => DocxDocument,
   suggestedName: string
 ) {
   button.addEventListener("click", async function () {
     let loadedData = loadedDataRef.get();
     if (loadedData) {
-      let docxDocument = documentGenerator(loadedData);
+      let messageCollector = new MessageCollector();
+      let docxDocumentResult = tryWithMessageCollector(
+        () => documentGenerator(loadedData, messageCollector),
+        messageCollector
+      );
+
+      updateMessages(messageCollector);
+
+      if (!docxDocumentResult.success) return;
+
+      let docxDocument = docxDocumentResult.value;
+
       let content = await Packer.toArrayBuffer(docxDocument);
       let blob = new Blob([content], {
         type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -176,4 +231,61 @@ function setupButton(
   loadedDataRef.with((loadedData) => {
     button.disabled = !loadedData;
   });
+}
+
+let warnMessagesElement = document.getElementById(
+  "warn-messages"
+)! as HTMLDivElement;
+let errorMessagesElement = document.getElementById(
+  "error-messages"
+)! as HTMLDivElement;
+let codeErrorMessagesElement = document.getElementById(
+  "code-error-messages"
+)! as HTMLDivElement;
+
+function updateMessages(messageCollector: MessageCollector) {
+  updateMessagesFor(messageCollector, "warn", warnMessagesElement);
+  updateMessagesFor(messageCollector, "error", errorMessagesElement);
+  updateMessagesFor(messageCollector, "codeError", codeErrorMessagesElement);
+}
+
+function updateMessagesFor(
+  messageCollector: MessageCollector,
+  type: "warn" | "error" | "codeError",
+  element: HTMLDivElement
+) {
+  while (element.firstChild) element.removeChild(element.firstChild);
+
+  let candidateMessages = messageCollector.messages.filter(
+    (m) => m.type === type
+  );
+  element.style.display = candidateMessages.length > 0 ? "block" : "none";
+
+  element.appendChild(
+    iife(() => {
+      let el = document.createElement("div");
+      el.textContent = element.dataset.title!;
+      el.style.fontSize = "24px";
+      return el;
+    })
+  );
+  element.appendChild(
+    iife(() => {
+      let ul = document.createElement("ul");
+
+      for (let message of candidateMessages) {
+        ul.appendChild(
+          iife(() => {
+            let li = document.createElement("li");
+
+            li.textContent = message.messageContent;
+
+            return li;
+          })
+        );
+      }
+
+      return ul;
+    })
+  );
 }

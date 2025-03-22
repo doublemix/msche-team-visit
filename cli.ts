@@ -7,12 +7,15 @@ import {
   loadData,
   type LoadDataOptions,
   type Data,
+  MessageCollector,
 } from "./generate-documents.ts";
 import { Packer, type Document } from "docx";
 
+let messageCollector = new MessageCollector();
+
 function loadDataFromFile(inputFileName: string, options: LoadDataOptions) {
   let content = fs.readFileSync(inputFileName);
-  return loadData(content, options);
+  return loadData(content, options, messageCollector);
 }
 
 async function generateDocumentToFile(fn: () => Document, fileName: string) {
@@ -23,7 +26,7 @@ async function generateDocumentToFile(fn: () => Document, fileName: string) {
 
 function generateFullItineraryToFile(data: Data, outputFileName: string) {
   return generateDocumentToFile(
-    () => generateFullItinerary(data),
+    () => generateFullItinerary(data, messageCollector),
     outputFileName
   );
 }
@@ -33,7 +36,7 @@ function generateIndividualItinerariesToFile(
   outputFileName: string
 ) {
   return generateDocumentToFile(
-    () => generateIndividualItineraries(data),
+    () => generateIndividualItineraries(data, messageCollector),
     outputFileName
   );
 }
@@ -44,7 +47,7 @@ function generateSummaryItineraryToFile(
   shouldIncludeRoles: boolean
 ) {
   return generateDocumentToFile(
-    () => generateSummaryItinerary(data, shouldIncludeRoles),
+    () => generateSummaryItinerary(data, shouldIncludeRoles, messageCollector),
     outputFileName
   );
 }

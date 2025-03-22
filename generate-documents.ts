@@ -29,6 +29,44 @@ import {
 } from "docx";
 import { parse as parseSimpleXml } from "./simple-xml.js";
 
+export class UserError extends Error {
+  constructor(message?: string) {
+    super(message);
+  }
+}
+
+interface Message {
+  type: "log" | "warn" | "error" | "codeError";
+  messageContent: string;
+}
+export class MessageCollector {
+  messages: Message[];
+  constructor() {
+    this.messages = [];
+  }
+  codeError(err: Error) {
+    this.pushMessage("codeError", "error", err.message, err);
+  }
+  error(messageContent: string, ...optionalParams: any[]) {
+    this.pushMessage("error", "error", messageContent, ...optionalParams);
+  }
+  warn(messageContent: string, ...optionalParams: any[]) {
+    this.pushMessage("warn", "warn", messageContent, ...optionalParams);
+  }
+  log(messageContent: string, ...optionalParams: any[]) {
+    this.pushMessage("log", "log", messageContent, ...optionalParams);
+  }
+  pushMessage(
+    type: Message["type"],
+    logType: "log" | "warn" | "error",
+    messageContent: string,
+    ...optionalParams: any[]
+  ) {
+    this.messages.push({ type, messageContent });
+    console[logType](messageContent, ...optionalParams);
+  }
+}
+
 type SimpleXml = SimpleXmlNode[];
 type SimpleXmlNode = SimpleXmlTextNode | SimpleXmlTagNode;
 type SimpleXmlTextNode = { type: "text"; value: string };
@@ -225,7 +263,7 @@ let boolean = (input: string) => {
 let stringToBoolean = (yesText: string, noText: string) => (input: string) => {
   if (input === yesText) return true;
   if (input === noText) return false;
-  throw new Error(
+  throw new UserError(
     `failed to parse boolean, expected ${yesText} or ${noText}, got ${input}`
   );
 };
@@ -259,7 +297,7 @@ let mapInput =
         return output;
       }
     }
-    throw new Error(`Unmapped value for mapInput: ${input}`);
+    throw new UserError(`Unmapped value for mapInput: ${input}`);
   };
 
 type Mapper =
@@ -287,7 +325,8 @@ function mapFields<T>(data: any[], mapper: Record<string, Mapper>): T[] {
 
 function mapField(data: any, mapper: Mapper): any {
   if (typeof mapper === "string") {
-    if (!(mapper in data)) throw new Error(`Field ${mapper} not found in data`);
+    if (!(mapper in data))
+      throw new UserError(`Field ${mapper} not found in data`);
     let value = data[mapper];
     if (typeof value === "string") {
       return value.trim();
@@ -296,9 +335,9 @@ function mapField(data: any, mapper: Mapper): any {
   } else if (mapper instanceof RegExp) {
     let candidateKeys = Object.keys(data).filter((key) => key.match(mapper));
     if (candidateKeys.length === 0)
-      throw new Error(`Field ${mapper} not found in data`);
+      throw new UserError(`Field ${mapper} not found in data`);
     if (candidateKeys.length > 1)
-      throw new Error(
+      throw new UserError(
         `Multiple keys match ${mapper}: ${candidateKeys.join(
           ", "
         )}; use a more specific expression`
@@ -318,7 +357,12 @@ function mapField(data: any, mapper: Mapper): any {
       if (propertyDefinition.get || propertyDefinition.set) {
         Object.defineProperty(result, key, propertyDefinition);
       } else {
-        result[key] = mapField(data, subMapper as any);
+        let value = mapField(data, subMapper as any);
+        if (key.startsWith("$")) {
+          Object.assign(result, value);
+        } else {
+          result[key] = mapField(data, subMapper as any);
+        }
       }
     }
     return result;
@@ -360,9 +404,18 @@ export type Participant = {
   fullName: string;
 };
 
+export interface TimeOfDay {
+  hour12: number;
+  hour24: number;
+  minute: number;
+  amPm: "a" | "p";
+}
+
 export type ProposedMeeting = {
   date: string;
   time: string;
+  startTime: TimeOfDay | null;
+  endTime: TimeOfDay | null;
   meetingLocation: string;
   zoomRoomOptionType: "none" | "optional" | "primary";
   shouldShowZoomRoom: boolean;
@@ -506,7 +559,8 @@ function getColumnIndex(
 
 export function loadData(
   input: Buffer | ArrayBuffer,
-  opts: LoadDataOptions
+  opts: LoadDataOptions,
+  messageCollector: MessageCollector
 ): Data {
   // let workbook = xlsx.readFile(filename, { dense: true });
   let workbook = xlsxRead(input, { dense: true });
@@ -526,7 +580,13 @@ export function loadData(
               try {
                 parsed = parseSimpleXml(cell?.r);
               } catch (err) {
-                console.error("Error while parsing XML: " + cell?.h, err);
+                messageCollector.warn(
+                  "Error while parsing XML: " +
+                    cell?.h +
+                    "; " +
+                    (err instanceof Error ? err.message : err),
+                  err
+                );
               }
             }
             return { "Formatted roles": parsed };
@@ -565,11 +625,6 @@ export function loadData(
         ? ["Team Member", commaSeparatedList]
         : _throw(new Error("unexpected teamRoleSource")),
   });
-  // let firstRow = proposedMeetingsRawData[0];
-  // if (firstRow.date)
-  //   throw new Error(
-  //     "Unexpected date in first row, first row should be team member assignments"
-  //   );
 
   if (opts.teamRoleSource.type === "meetingsTable") {
     let meetingsWorksheet = workbook.Sheets["Proposed Meetings-MSCHE Team"];
@@ -608,11 +663,101 @@ export function loadData(
     }
   }
 
+  function getTimeFromEnd(
+    hourAsString: string,
+    minuteAsString: string,
+    fromEndTime: TimeOfDay
+  ): TimeOfDay {
+    let candidateTime = getTime(hourAsString, minuteAsString, fromEndTime.amPm);
+    if (candidateTime.hour24 > fromEndTime.hour24) {
+      candidateTime = getTime(hourAsString, minuteAsString, "a");
+    }
+    return candidateTime;
+  }
+  function getTime(
+    hourAsString: string,
+    minuteAsString: string,
+    amPm: string
+  ): TimeOfDay {
+    let hour = parseInt(hourAsString);
+    let minute = parseInt(minuteAsString);
+
+    if (!isFinite(hour)) {
+      throw new Error("invalid hour");
+    }
+    if (!isFinite(minute)) {
+      throw new Error("invalid minute");
+    }
+
+    // convert to twenty hour as
+    let isPm = amPm === "p";
+    let isAm = amPm === "a";
+
+    if (!isAm && !isPm) {
+      throw new Error("invalid am/pm indicator");
+    }
+    let hour24 = hour === 12 ? (isAm ? 0 : 12) : isPm ? hour + 12 : hour;
+
+    return {
+      hour12: hour,
+      hour24: hour24,
+      amPm: isAm ? "a" : "p",
+      minute,
+    };
+  }
+
   let proposedMeetingsData = mapFields<ProposedMeeting>(
     proposedMeetingsRawData.filter((m) => m.Date),
     {
       date: "Date",
-      time: "Time",
+      $time: [
+        "Time",
+        (time: string) => {
+          let match;
+          let startTime: TimeOfDay | null = null,
+            endTime: TimeOfDay | null = null;
+          if (
+            (match = time.match(
+              /^Up to (?<hour>[0-9]+):(?<minute>[0-9]+) (?<ampm>[ap])\.m\.$/
+            ))
+          ) {
+            endTime = getTime(
+              match.groups!.hour,
+              match.groups!.minute,
+              match.groups!.ampm
+            );
+          } else if (
+            (match = time.match(
+              /^(?<hour>[0-9]+):(?<minute>[0-9]+) (?<ampm>[ap])\.m\.$/
+            ))
+          ) {
+            startTime = getTime(
+              match.groups!.hour,
+              match.groups!.minute,
+              match.groups!.ampm
+            );
+          } else if (
+            (match = time.match(
+              /^(?<startHour>[0-9]+):(?<startMinute>[0-9]+)[-–](?<endHour>[0-9]+):(?<endMinute>[0-9]+) (?<endAmPm>[ap])\.m\.$/
+            ))
+          ) {
+            endTime = getTime(
+              match.groups!.endHour,
+              match.groups!.endMinute,
+              match.groups!.endAmPm
+            );
+            startTime = getTimeFromEnd(
+              match.groups!.startHour,
+              match.groups!.startMinute,
+              endTime
+            );
+          } else {
+            throw new Error(`couldn't parse time: \`${time}\``);
+          }
+
+          return { time, startTime, endTime };
+        },
+      ],
       meetingLocation: "Meeting Location",
       zoomRoomOptionType: [
         "Zoom Room Option",
@@ -694,7 +839,10 @@ function getParticipantTeamMembers(
   };
 }
 
-export function generateFullItinerary(data: Data) {
+export function generateFullItinerary(
+  data: Data,
+  messageCollector: MessageCollector
+) {
   const { proposedMeetingsData, participantListData, zoomRoomsByName } = data;
 
   let proposedMeetingsGroupedByDate = groupBy(
@@ -849,7 +997,11 @@ export function generateFullItinerary(data: Data) {
 
                     if (meeting.shouldShowZoomRoom) {
                       segments.push({
-                        run: ZoomLink(meeting.zoomRoomName, zoomRoomsByName),
+                        run: ZoomLink(
+                          meeting.zoomRoomName,
+                          zoomRoomsByName,
+                          messageCollector
+                        ),
                       });
                     }
 
@@ -915,7 +1067,7 @@ export function generateFullItinerary(data: Data) {
                         (participant) => participant.id === individual.id
                       );
                       if (!participant) {
-                        console.error(
+                        messageCollector.error(
                           `missing individual in ${meeting.interviewAssignments}: ` +
                             individual.id
                         );
@@ -983,7 +1135,10 @@ export function generateFullItinerary(data: Data) {
   return doc;
 }
 
-export function generateIndividualItineraries(data: Data) {
+export function generateIndividualItineraries(
+  data: Data,
+  messageCollector: MessageCollector
+) {
   const { proposedMeetingsData, participantListData, zoomRoomsByName } = data;
 
   let teamMembers = participantListData.filter(
@@ -1006,7 +1161,12 @@ export function generateIndividualItineraries(data: Data) {
     let meetingsForIndividual = proposedMeetingsData.filter((meeting) => {
       return individual.teamMemberRoles.some((role) => {
         let definition = teamMemberDefinitionsByRole.get(role);
-        if (!definition) throw new Error();
+        if (!definition) {
+          messageCollector.warn(
+            "unable to find definition of team role: " + role
+          );
+          return false;
+        }
         return meeting[definition.property];
       });
     });
@@ -1096,7 +1256,11 @@ export function generateIndividualItineraries(data: Data) {
                             results.push({
                               // keepNext: !isLast,
                               children: [
-                                ZoomLink(meeting.zoomRoomName, zoomRoomsByName),
+                                ZoomLink(
+                                  meeting.zoomRoomName,
+                                  zoomRoomsByName,
+                                  messageCollector
+                                ),
                               ],
                             });
                           }
@@ -1199,7 +1363,8 @@ function separated<T, R>(
 
 export function generateSummaryItinerary(
   data: Data,
-  shouldIncludeRoles: boolean
+  shouldIncludeRoles: boolean,
+  messageCollector: MessageCollector
 ) {
   let { proposedMeetingsData, zoomRoomsByName } = data;
   let proposedMeetingsGroupedByDate = groupBy(
@@ -1336,7 +1501,8 @@ export function generateSummaryItinerary(
                                 children: [
                                   ZoomLink(
                                     meeting.zoomRoomName,
-                                    zoomRoomsByName
+                                    zoomRoomsByName,
+                                    messageCollector
                                   ),
                                 ],
                               });
@@ -1363,8 +1529,9 @@ export function generateSummaryItinerary(
                             generated = true;
                           }
                         } catch (err) {
-                          console.log(
-                            "err while trying output formatted roles: ",
+                          messageCollector.warn(
+                            "err while trying output formatted roles: " +
+                              (err instanceof Error ? err.message : err),
                             err
                           );
                         }
@@ -1625,12 +1792,13 @@ function CommonHeader({
 
 function ZoomLink(
   zoomRoomName: string,
-  zoomRoomsByName: Map<string, ZoomRoom>
-) {
+  zoomRoomsByName: Map<string, ZoomRoom>,
+  messageCollector: MessageCollector
+): ParagraphChild {
   let zoomRoom = zoomRoomsByName.get(zoomRoomName);
 
   if (!zoomRoom) {
-    throw new Error("missing zoom room: " + zoomRoomName);
+    throw new UserError("missing zoom room: " + zoomRoomName);
   }
 
   let link = zoomRoom.link?.trim() ?? "";
@@ -1647,7 +1815,7 @@ function ZoomLink(
       ],
     });
   } else {
-    console.log("zoom room without link: " + zoomRoomName);
+    messageCollector.error("zoom room without link: " + zoomRoomName);
     return new TextRun({
       text: zoomRoomName,
     });

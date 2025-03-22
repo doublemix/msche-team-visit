@@ -96,8 +96,30 @@
         margin: 0;
         text-align: center;
       }
-      #errors {
-        display: none;
+      #warn-messages {
+        background: rgb(255, 192, 74);
+        color: rgb(163, 43, 0);
+      }
+      #error-messages {
+        background: rgb(255, 110, 110);
+        color: rgb(92, 0, 0);
+      }
+      #code-error-messages {
+        background: darkred;
+        color: rgb(255, 171, 171);
+      }
+      #warn-messages,
+      #error-messages,
+      #code-error-messages {
+        padding: 15px;
+        border-radius: 15px;
+        font-size: 16px;
+
+        ul {
+          margin: 0;
+          padding-top: 0;
+          padding-bottom: 0;
+        }
       }
     </style>
   </head>
@@ -129,7 +151,21 @@
         <div class="active-indicator">
           <div class="active-indicator-inside">Drop file</div>
         </div>
-        <div id="errors"></div>
+        <div
+          id="code-error-messages"
+          data-title="Code Errors"
+          style="display: none"
+        ></div>
+        <div
+          id="error-messages"
+          data-title="Errors"
+          style="display: none"
+        ></div>
+        <div
+          id="warn-messages"
+          data-title="Warnings"
+          style="display: none"
+        ></div>
       </div>
     </div>
   </body>
