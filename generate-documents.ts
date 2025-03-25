@@ -77,11 +77,32 @@ type SimpleXmlTagNode = {
   content: SimpleXml;
 };
 
-function formatSimpleXml(xml: SimpleXml) {
-  type ActiveOptions = { bold?: true; italics?: true; underline?: true };
+export type FormattingOptions = {
+  bold?: true;
+  italics?: true;
+  underline?: true;
+};
 
-  let results: TextRun[] = [];
-  let defaultOptions: ActiveOptions = {};
+function generateTextNodeWithOptions(
+  content: string,
+  activeOptions: FormattingOptions
+) {
+  return new TextRun({
+    bold: activeOptions.bold,
+    italics: activeOptions.italics,
+    underline: activeOptions.underline && {
+      type: "single",
+    },
+    text: content,
+  });
+}
+
+export function formatSimpleXml<T>(
+  xml: SimpleXml,
+  generateNode: (content: string, activeOptions: FormattingOptions) => T
+) {
+  let results: T[] = [];
+  let defaultOptions: FormattingOptions = {};
 
   handleContent();
 
@@ -93,7 +114,7 @@ function formatSimpleXml(xml: SimpleXml) {
       if (throwOnNonEmptyText(item)) continue;
       if (item.tagName === "r") handleRTag(item.content);
       else if (item.tagName === "t")
-        generateTextNodeWithOptions(item.content, defaultOptions);
+        generateNodesWithOptions(item.content, defaultOptions);
       else throw new Error("unexpected tag at top-level: " + item.tagName);
     }
   }
@@ -110,7 +131,7 @@ function formatSimpleXml(xml: SimpleXml) {
       } else throw new Error("unexpected tag in `r` tag: " + item.tagName);
     }
 
-    let activeOptions: ActiveOptions = {};
+    let activeOptions: FormattingOptions = {};
 
     for (let runPropertiesNode of runPropertiesNodes) {
       for (let item of runPropertiesNode.content) {
@@ -123,26 +144,17 @@ function formatSimpleXml(xml: SimpleXml) {
     }
 
     for (let textNode of textNodes) {
-      generateTextNodeWithOptions(textNode.content, activeOptions);
+      generateNodesWithOptions(textNode.content, activeOptions);
     }
   }
 
-  function generateTextNodeWithOptions(
+  function generateNodesWithOptions(
     content: SimpleXml,
-    activeOptions: ActiveOptions
+    activeOptions: FormattingOptions
   ) {
     for (let item of content) {
       if (item.type !== "text") throw new Error("only expecting text content");
-      results.push(
-        new TextRun({
-          bold: activeOptions.bold,
-          italics: activeOptions.italics,
-          underline: activeOptions.underline && {
-            type: "single",
-          },
-          text: item.value,
-        })
-      );
+      results.push(generateNode(item.value, activeOptions));
     }
   }
 
@@ -413,6 +425,7 @@ export interface TimeOfDay {
 
 export type ProposedMeeting = {
   date: string;
+  parsedDate: Date | null;
   time: string;
   startTime: TimeOfDay | null;
   endTime: TimeOfDay | null;
@@ -505,7 +518,7 @@ let groupBy = <T, K extends PropertyKey>(
   return groups;
 };
 
-let teamMemberDefinitions = [
+export const teamMemberDefinitions = [
   { property: "teamChair" as "teamChair", value: "Team Chair" },
   { property: "standard1TeamMember" as "standard1TeamMember", value: "SI" },
   { property: "standard2TeamMember" as "standard2TeamMember", value: "SII" },
@@ -709,7 +722,33 @@ export function loadData(
   let proposedMeetingsData = mapFields<ProposedMeeting>(
     proposedMeetingsRawData.filter((m) => m.Date),
     {
-      date: "Date",
+      $date: [
+        "Date",
+        (date: string) => {
+          let parsedDate = null;
+          try {
+            let match;
+            if ((match = date.match(/^\w+, (?<month>\w+) (?<day>[0-9]+)/))) {
+              let monthAsString = match.groups!.month;
+              let dayAsString = match.groups!.day;
+
+              let month =
+                { March: 3 }[monthAsString] ??
+                _throw("unknown month: " + monthAsString);
+              let day = parseInt(dayAsString);
+              let year = 2025;
+
+              parsedDate = new Date(`${year}-${month}-${day}`);
+            } else {
+              throw new Error("unknown date format: " + date);
+            }
+          } catch {
+            // ignore
+          }
+
+          return { date, parsedDate };
+        },
+      ],
       $time: [
         "Time",
         (time: string) => {
@@ -1517,7 +1556,8 @@ export function generateSummaryItinerary(
                         try {
                           if (meeting.teamRolesData) {
                             let formatted = formatSimpleXml(
-                              meeting.teamRolesData
+                              meeting.teamRolesData,
+                              generateTextNodeWithOptions
                             );
                             row.push(
                               NormalTableCell([
