@@ -2,6 +2,7 @@ import { singleOrDefault } from "@/app/utils";
 import { getDatabase } from "@/database";
 import { notFound } from "next/navigation";
 import TimeInterpretation from "./time-interpretation";
+import FormattedHtml, { FormattedHtmlData } from "@/app/formatted-html";
 
 type Meeting = {
   id: number;
@@ -12,6 +13,7 @@ type Meeting = {
   name: string;
   location: string;
   zoomRoomId: number | null;
+  roleInfo: FormattedHtmlData | null;
 };
 
 type Participant = {
@@ -34,8 +36,11 @@ async function getData(id: string) {
 
   let sql = getDatabase();
 
-  let meetingData =
-    await sql`SELECT id, date, time as "timeDisplay", starttime as "startTime", endtime as "endTime", name, location, zoomRoomId as "zoomRoomId" FROM meetings WHERE id = ${idAsNumber}`;
+  let meetingData = await sql`
+      SELECT id,
+        date, time as "timeDisplay", starttime as "startTime", endtime as "endTime",
+        name, location, zoomRoomId as "zoomRoomId", "roleInfo"
+      FROM meetings WHERE id = ${idAsNumber}`;
 
   let meeting = singleOrDefault(meetingData, null) as Meeting;
 
@@ -91,7 +96,7 @@ export default async function Page({ params }: Props) {
       </div>
       {zoomRoom && (
         <div>
-          Zoom Room Option:{" "}
+          <span className="font-bold">Zoom Room Option:</span>{" "}
           <a className="text-blue-500" href={zoomRoom.link}>
             {zoomRoom.name}
           </a>
@@ -102,6 +107,14 @@ export default async function Page({ params }: Props) {
         title="CU Representatives"
         participants={representatives}
       />
+      {meeting.roleInfo && (
+        <div>
+          <div className="leading-[110%] font-bold">Role Info:</div>
+          <div className="pl-4 text-sm leading-[110%] text-gray-600">
+            <FormattedHtml data={meeting.roleInfo} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -113,15 +126,15 @@ type ParticipantListProps = {
 function ParticipantList({ title, participants }: ParticipantListProps) {
   return (
     <div>
-      <div>{title}:</div>
+      <div className="font-bold">{title}:</div>
       <ul className="list-disc pl-8">
+        {participants.length === 0 && <li className="italic">None</li>}
         {participants.map((p) => {
           return (
             <li key={p.id}>
-              {p.name}{" "}
-              <span className="inline-block pl-1 text-xs text-gray-500">
-                {p.title}
-              </span>
+              {p.name}
+              <span className="inline-block w-4"> </span>
+              <span className="text-xs text-gray-500">{p.title}</span>
             </li>
           );
         })}
