@@ -35,49 +35,51 @@ export default async function Page() {
 
   return (
     <TimeInterpretationContextProvider defaultDisplay="timeDisplay">
-      <table className="table-auto">
-        <tbody>
-          {meetingsGroupedByDate.map((meetingGroup) => {
-            return (
-              <Fragment key={meetingGroup.key}>
-                <tr>
-                  <td
-                    colSpan={2}
-                    className="bg-gray-300 px-4 py-2 text-lg font-bold"
-                  >
-                    {meetingGroup.key}
-                  </td>
-                </tr>
-                {meetingGroup.map((meeting) => {
-                  return (
-                    <tr
-                      key={meeting.id}
-                      className="odd:bg-white even:bg-gray-100"
+      <div className="overflow-auto">
+        <table className="table-auto">
+          <tbody>
+            {meetingsGroupedByDate.map((meetingGroup) => {
+              return (
+                <Fragment key={meetingGroup.key}>
+                  <tr>
+                    <td
+                      colSpan={2}
+                      className="bg-gray-300 px-4 py-2 text-lg font-bold"
                     >
-                      <td className="px-4 py-2">
-                        <Link
-                          className="text-blue-400"
-                          href={`/meetings/${meeting.id}`}
-                        >
-                          {meeting.name}
-                        </Link>
-                      </td>
-                      <td className="px-4 py-2 text-right whitespace-nowrap">
-                        <TimeInterpretation
-                          defaultDisplay="timeDisplay"
-                          timeDisplay={meeting.timeDisplay}
-                          startTime={meeting.startTime}
-                          endTime={meeting.endTime}
-                        />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </Fragment>
-            );
-          })}
-        </tbody>
-      </table>
+                      {meetingGroup.key}
+                    </td>
+                  </tr>
+                  {meetingGroup.map((meeting) => {
+                    return (
+                      <tr
+                        key={meeting.id}
+                        className="odd:bg-white even:bg-gray-100"
+                      >
+                        <td className="px-4 py-2">
+                          <Link
+                            className="text-blue-400"
+                            href={`/meetings/${meeting.id}`}
+                          >
+                            {meeting.name}
+                          </Link>
+                        </td>
+                        <td className="px-4 py-2 text-right whitespace-nowrap">
+                          <TimeInterpretation
+                            defaultDisplay="timeDisplay"
+                            timeDisplay={meeting.timeDisplay}
+                            startTime={meeting.startTime}
+                            endTime={meeting.endTime}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </TimeInterpretationContextProvider>
   );
 }
