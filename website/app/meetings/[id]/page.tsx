@@ -6,7 +6,7 @@ import TimeInterpretation from "./time-interpretation";
 type Meeting = {
   id: number;
   date: string;
-  time: string;
+  timeDisplay: string;
   startTime: Date | null;
   endTime: Date | null;
   name: string;
@@ -35,7 +35,7 @@ async function getData(id: string) {
   let sql = getDatabase();
 
   let meetingData =
-    await sql`SELECT id, date, time, starttime as "startTime", endtime as "endTime", name, location, zoomRoomId as "zoomRoomId" FROM meetings WHERE id = ${idAsNumber}`;
+    await sql`SELECT id, date, time as "timeDisplay", starttime as "startTime", endtime as "endTime", name, location, zoomRoomId as "zoomRoomId" FROM meetings WHERE id = ${idAsNumber}`;
 
   let meeting = singleOrDefault(meetingData, null) as Meeting;
 
@@ -80,12 +80,13 @@ export default async function Page({ params }: Props) {
       <h1 className="text-3xl font-bold">{meeting.name}</h1>
       <div className="flex flex-col flex-nowrap gap-0 text-sm/[120%] text-gray-500">
         <div>
-          {meeting.date}, {meeting.time}
+          {meeting.date}, {meeting.timeDisplay}
         </div>
         <div>{meeting.location}</div>
         <TimeInterpretation
           startTime={meeting.startTime}
           endTime={meeting.endTime}
+          timeDisplay={meeting.timeDisplay}
         />
       </div>
       {zoomRoom && (

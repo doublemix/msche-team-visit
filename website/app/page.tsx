@@ -1,12 +1,15 @@
 import { getDatabase } from "@/database";
 import { getNowFromSearch } from "./utils";
 import React from "react";
-import TimeInterpretation from "./meetings/[id]/time-interpretation";
+import TimeInterpretation, {
+  TimeInterpretationContextProvider,
+} from "./meetings/[id]/time-interpretation";
 import Link from "next/link";
 
 interface Meeting {
   id: number;
   name: string;
+  timeDisplay: string;
   startTime: Date | null;
   endTime: Date | null;
 }
@@ -17,7 +20,7 @@ async function getData(now: number) {
 
   let currentMeetings = (await sql`
     SELECT
-      id, name, startTime as "startTime", endTime as "endTime"
+      id, name, time as "timeDisplay", startTime as "startTime", endTime as "endTime"
     FROM meetings
     WHERE startTime IS NOT NULL
       AND endTime IS NOT NULL
@@ -27,7 +30,7 @@ async function getData(now: number) {
 
   let upcomingMeetings = (await sql`
     SELECT
-      id, name, startTime as "startTime", endTime as "endTime"
+      id, name, time as "timeDisplay", startTime as "startTime", endTime as "endTime"
     FROM meetings
     WHERE startTime IS NOT NULL
       AND startTime = (SELECT MIN(startTime) FROM meetings WHERE startTime > ${date})
@@ -48,8 +51,12 @@ export default async function Page({ searchParams }: PageProps) {
 
   return (
     <div className="flex flex-col gap-8">
-      <MeetingList title="Current Meetings" meetings={currentMeetings} />
-      <MeetingList title="Upcoming Meetings" meetings={upcomingMeetings} />
+      <TimeInterpretationContextProvider defaultDisplay="timeDisplay">
+        <MeetingList title="Current Meetings" meetings={currentMeetings} />
+      </TimeInterpretationContextProvider>
+      <TimeInterpretationContextProvider defaultDisplay="timeUntil">
+        <MeetingList title="Upcoming Meetings" meetings={upcomingMeetings} />
+      </TimeInterpretationContextProvider>
     </div>
   );
 }
@@ -81,6 +88,7 @@ function MeetingList({ title, meetings }: MeetingListProps) {
                   <TimeInterpretation
                     startTime={m.startTime}
                     endTime={m.endTime}
+                    timeDisplay={m.timeDisplay}
                   />
                 </div>
               </div>

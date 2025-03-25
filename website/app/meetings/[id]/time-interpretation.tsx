@@ -2,22 +2,98 @@
 
 import { useNow } from "@/app/hooks";
 import { Clock3 } from "lucide-react";
+import { createContext, useCallback, useContext, useState } from "react";
+
+type TimeDisplay = "timeUntil" | "timeDisplay";
+
+let TimeInterpretationContext = createContext<{
+  displayType: TimeDisplay;
+  toggleDisplayType: () => void;
+} | null>(null);
+
+type ProviderProps = {
+  defaultDisplay?: TimeDisplay;
+  children?: React.ReactNode;
+};
+
+export function TimeInterpretationContextProvider({
+  defaultDisplay = "timeUntil",
+  children,
+}: ProviderProps) {
+  let [displayType, setDisplayType] = useState(defaultDisplay);
+
+  let toggleDisplayType = useCallback(() => {
+    setDisplayType((previous) =>
+      previous === "timeDisplay" ? "timeUntil" : "timeDisplay",
+    );
+  }, []);
+
+  return (
+    <TimeInterpretationContext value={{ displayType, toggleDisplayType }}>
+      {children}
+    </TimeInterpretationContext>
+  );
+}
 
 type TimeInterpretationProps = {
   startTime: Date | null;
   endTime: Date | null;
+  timeDisplay: React.ReactNode;
+  defaultDisplay?: TimeDisplay;
 };
+
 export default function TimeInterpretation({
+  defaultDisplay,
+  ...otherProps
+}: TimeInterpretationProps) {
+  let contextValue = useContext(TimeInterpretationContext);
+
+  if (contextValue === null) {
+    return (
+      <TimeInterpretationContextProvider defaultDisplay={defaultDisplay}>
+        <TimeInterpretation {...otherProps} />
+      </TimeInterpretationContextProvider>
+    );
+  }
+
+  let { displayType, toggleDisplayType } = contextValue;
+
+  return (
+    <TimeInterpretationCore
+      {...otherProps}
+      displayType={displayType}
+      onToggleDisplayType={toggleDisplayType}
+    />
+  );
+}
+
+type TimeInterpretationCoreProps = {
+  startTime: Date | null;
+  endTime: Date | null;
+  timeDisplay: React.ReactNode;
+  displayType: TimeDisplay;
+  onToggleDisplayType: () => void;
+};
+function TimeInterpretationCore({
   startTime,
   endTime,
-}: TimeInterpretationProps) {
+  timeDisplay,
+  displayType,
+  onToggleDisplayType,
+}: TimeInterpretationCoreProps) {
   let now = useNow();
   let message = getTimeInterpretation(now, startTime, endTime);
+
   if (message === null) return null;
 
   return (
-    <div>
-      <Clock3 size={14} className="inline align-top" /> {message}
+    <div onClick={onToggleDisplayType}>
+      {displayType === "timeUntil" && (
+        <>
+          <Clock3 size="0.9em" className="inline align-baseline" /> {message}
+        </>
+      )}
+      {displayType === "timeDisplay" && <>{timeDisplay}</>}
     </div>
   );
 }
@@ -57,7 +133,7 @@ function getTimeInterpretation(
   }
 
   if (startTimeTs !== null && endTimeTs === null) {
-    let afterStart = startTimeTs - now;
+    let afterStart = now - startTimeTs;
     let durationDisplay = formatDurationMs(afterStart);
 
     return `${durationDisplay} ago`;
