@@ -8,14 +8,16 @@ import {
   MessageCollector,
   formatSimpleXml,
   type FormattingOptions,
-} from "../generate-documents.ts";
+} from "./generate-documents.ts";
 import fs from "node:fs";
-import { _throw, single } from "./app/utils.ts";
+import { _throw, single } from "./website/app/utils.ts";
 
 function formatTimestamp(date: Date | null, time: TimeOfDay | null) {
   if (date === null) return null;
   if (time === null) return null;
-  return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()} ${time.hour24}:${time.minute}-04:00`;
+  return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()} ${
+    time.hour24
+  }:${time.minute}-04:00`;
 }
 
 async function populateDatabase(data: Data) {
@@ -88,7 +90,7 @@ async function populateDatabase(data: Data) {
             (text: string, formattingOptions: FormattingOptions) => ({
               ...formattingOptions,
               text,
-            }),
+            })
           )
         : null;
 
@@ -137,7 +139,7 @@ async function populateDatabase(data: Data) {
   }
 
   let mscheTeamMembers = data.participantListData.filter(
-    (x) => x.teamMemberRoles.length > 0,
+    (x) => x.teamMemberRoles.length > 0
   );
 
   for (let meeting of data.proposedMeetingsData) {
@@ -161,7 +163,7 @@ async function populateDatabase(data: Data) {
       if (
         mscheTeamMember.teamMemberRoles.some((role) => {
           let teamMemberDefinition = teamMemberDefinitions.find(
-            (x) => x.value === role,
+            (x) => x.value === role
           );
           if (!teamMemberDefinition) return false;
           return meeting[teamMemberDefinition.property];
@@ -185,6 +187,6 @@ let data = loadData(
     teamRoleSource: { type: "meetingsTable", nameRow: 0, headerRow: 2 },
     meetingRange: 2,
   },
-  new MessageCollector(),
+  new MessageCollector()
 );
 populateDatabase(data);
